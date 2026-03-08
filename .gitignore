@@ -1,0 +1,50 @@
+# Dependencies
+node_modules
+paymaster-relay/node_modules
+
+# Build output
+dist
+dist-ssr
+
+# Environment variables — KABHI PUSH MAT KARO
+.env
+paymaster-relay/.env
+
+# Transaction history — user data private rakho
+paymaster-relay/tx_history.json
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Local only
+*.local
+```
+
+---
+
+## Push Karne Se Pehle Confirm Karo
+
+`.env` file mein yeh hain — yeh **kabhi** GitHub pe nahi jaane chahiye:
+```
+RELAYER_PRIVATE_KEY=0x...   ← Private key leak = tokens chori
+VEC_TOKEN_ADDRESS=0x...
+RPC_URL=...

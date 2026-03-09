@@ -38,13 +38,3 @@ Thumbs.db
 # Local only
 *.local
 ```
-
----
-
-## Push Karne Se Pehle Confirm Karo
-
-`.env` file mein yeh hain — yeh **kabhi** GitHub pe nahi jaane chahiye:
-```
-RELAYER_PRIVATE_KEY=0x...   ← Private key leak = tokens chori
-VEC_TOKEN_ADDRESS=0x...
-RPC_URL=...

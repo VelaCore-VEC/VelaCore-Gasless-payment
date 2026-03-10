@@ -33,37 +33,54 @@ app.use(cors({
 }))
 app.use(express.json())
 
-// ─── DB helpers ────────────────────────────────────────────────────────────────
+// ─── DB — In-Memory Store (Railway ephemeral filesystem workaround) ───────────
+// Railway wipes files on redeploy. We keep history in memory (survives requests,
+// not redeploys) and also try to write to file as backup when possible.
+
+var DB_MEMORY = {}   // in-memory store — always works
 const DB_FILE = path.join(__dirname, 'tx_history.json')
 
-if (!fs.existsSync(DB_FILE)) {
-  fs.writeFileSync(DB_FILE, JSON.stringify({}, null, 2))
-  console.log('[DB] Created tx_history.json')
+// Load from file into memory on startup (works locally, may fail on Railway)
+function loadFromFile() {
+  try {
+    var raw = fs.readFileSync(DB_FILE, 'utf8')
+    DB_MEMORY = JSON.parse(raw)
+    var total = Object.values(DB_MEMORY).reduce(function(s,a){ return s+a.length },0)
+    console.log('[DB] Loaded', total, 'transactions from file into memory')
+  } catch(e) {
+    DB_MEMORY = {}
+    console.log('[DB] Starting with empty in-memory store (file not found or invalid)')
+  }
 }
+loadFromFile()
 
-function readDB() {
-  try { return JSON.parse(fs.readFileSync(DB_FILE, 'utf8')) }
-  catch (e) { return {} }
-}
-
-function writeDB(data) {
-  try { fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2)) }
-  catch (e) { console.error('[DB] Write error:', e.message) }
+// Try to persist to file — silently ignore failures (Railway read-only fs)
+function tryWriteFile() {
+  try {
+    fs.writeFileSync(DB_FILE, JSON.stringify(DB_MEMORY, null, 2))
+  } catch(e) {
+    // Silent — expected on Railway ephemeral filesystem
+  }
 }
 
 function saveTx(walletAddress, txData) {
-  var db  = readDB()
   var key = walletAddress.toLowerCase()
-  if (!db[key]) db[key] = []
-  db[key].unshift(txData)
-  if (db[key].length > 1000) db[key] = db[key].slice(0, 1000)
-  writeDB(db)
+  if (!DB_MEMORY[key]) DB_MEMORY[key] = []
+  DB_MEMORY[key].unshift(txData)
+  if (DB_MEMORY[key].length > 500) DB_MEMORY[key] = DB_MEMORY[key].slice(0, 500)
+  tryWriteFile()
+  console.log('[DB] Saved tx for', key.slice(0,10), '— total for wallet:', DB_MEMORY[key].length)
 }
 
 function getTxHistory(walletAddress) {
-  var db  = readDB()
   var key = walletAddress.toLowerCase()
-  return db[key] || []
+  return DB_MEMORY[key] || []
+}
+
+function getDBStats() {
+  var wallets = Object.keys(DB_MEMORY).length
+  var txTotal = Object.values(DB_MEMORY).reduce(function(s,a){ return s+a.length },0)
+  return { wallets: wallets, transactions: txTotal }
 }
 
 // ─── Env check ─────────────────────────────────────────────────────────────────
@@ -227,13 +244,15 @@ app.get('/status', async (req, res) => {
     const relayerWallet = new ethers.Wallet(RELAYER_PK, provider)
     const bnbBal        = await provider.getBalance(relayerWallet.address)
     const bnbFloat      = parseFloat(ethers.formatEther(bnbBal))
+    var dbStats = getDBStats()
     return res.json({
       success:        true,
       healthy:        bnbFloat >= 0.001,
       status:         bnbFloat >= 0.001 ? 'FUNDED' : 'LOW — Please refill BNB',
       relayerAddress: relayerWallet.address,
       gasTankBNB:     ethers.formatEther(bnbBal),
-      totalWallets:   Object.keys(readDB()).length,
+      totalWallets:   dbStats.wallets,
+      totalTxInMemory:dbStats.transactions,
     })
   } catch (e) {
     console.error('[/status] ERROR:', e.message)

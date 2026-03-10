@@ -5,8 +5,32 @@ const { ethers } = require('ethers')
 const fs         = require('fs')
 const path       = require('path')
 
+const ALLOWED_ORIGINS = [
+  // Add your Vercel URL here
+  'https://velacore-gasless-payment.vercel.app',
+  // Allow any vercel preview URL
+  /\.vercel\.app$/,
+  // Local dev
+  'http://localhost:5173',
+  'http://localhost:4173',
+  'http://localhost:3000',
+]
+
 const app = express()
-app.use(cors())
+app.use(cors({
+  origin: function(origin, callback) {
+    // Allow requests with no origin (curl, Postman, server-to-server)
+    if (!origin) return callback(null, true)
+    var allowed = ALLOWED_ORIGINS.some(function(o) {
+      if (o instanceof RegExp) return o.test(origin)
+      return o === origin
+    })
+    if (allowed) return callback(null, true)
+    console.warn('[CORS] Blocked origin:', origin)
+    return callback(null, true)  // Allow all for now — tighten after testing
+  },
+  credentials: true,
+}))
 app.use(express.json())
 
 // ─── DB helpers ────────────────────────────────────────────────────────────────

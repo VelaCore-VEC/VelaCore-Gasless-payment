@@ -1,72 +1,58 @@
-export function Badge(props) {
-  var status = props.status
-  var styleMap = {
-    idle:       'bg-slate-700 text-slate-300',
-    connecting: 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/40',
-    connected:  'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40',
-    signing:    'bg-blue-500/20 text-blue-300 border border-blue-500/40 animate-pulse',
-    sending:    'bg-violet-500/20 text-violet-300 border border-violet-500/40 animate-pulse',
-    success:    'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40',
-    error:      'bg-red-500/20 text-red-300 border border-red-500/40',
-  }
-  var labelMap = {
-    idle:       'Ready',
-    connecting: 'Connecting...',
-    connected:  'Connected',
-    signing:    'Awaiting Signature...',
-    sending:    'Relaying...',
-    success:    'Transfer Complete!',
-    error:      'Error',
-  }
-  var cls   = styleMap[status] || styleMap.idle
-  var label = labelMap[status] || 'Ready'
+// ─── FlowStep ─────────────────────────────────────────────────────────────────
+export function FlowStep({ num, active, done, title, desc }) {
   return (
-    <span className={'text-xs px-3 py-1 rounded-full font-semibold ' + cls}>
-      {label}
-    </span>
-  )
-}
-
-export function StatCard(props) {
-  var colorMap = {
-    cyan:    'border-cyan-500/25 from-cyan-500/10 text-cyan-300',
-    violet:  'border-violet-500/25 from-violet-500/10 text-violet-300',
-    emerald: 'border-emerald-500/25 from-emerald-500/10 text-emerald-300',
-    amber:   'border-amber-500/25 from-amber-500/10 text-amber-300',
-  }
-  var c        = colorMap[props.color] || colorMap.cyan
-  var valColor = c.split(' ')[2]
-  return (
-    <div className={'rounded-xl border bg-gradient-to-br ' + c + ' to-transparent p-4'}>
-      <p className="text-xs text-slate-400 uppercase tracking-widest mb-1">{props.label}</p>
-      <p className={'text-2xl font-bold ' + valColor}>{props.value}</p>
-      {props.sub && (
-        <p className="text-xs text-slate-500 mt-1">{props.sub}</p>
-      )}
+    <div style={{ display:'flex', alignItems:'flex-start', gap:'14px' }}>
+      <div style={{
+        width:'34px', height:'34px', borderRadius:'50%', display:'flex', alignItems:'center',
+        justifyContent:'center', flexShrink:0, fontWeight:800, fontSize:'13px', transition:'all 0.3s',
+        background: done ? '#059669' : active ? '#4f46e5' : 'rgba(255,255,255,0.08)',
+        color:      done || active ? '#fff' : '#6b7280',
+        border:     done ? '2px solid #059669' : active ? '2px solid #818cf8' : '2px solid rgba(255,255,255,0.12)',
+        boxShadow:  active ? '0 0 18px rgba(99,102,241,0.6)' : done ? '0 0 14px rgba(5,150,105,0.5)' : 'none',
+      }}>
+        {done ? '✓' : num}
+      </div>
+      <div style={{ paddingTop:'5px' }}>
+        <p style={{ fontSize:'14px', fontWeight:700, margin:'0 0 4px', transition:'color 0.3s',
+          color: done ? '#34d399' : active ? '#a5b4fc' : '#e2e8f0' }}>{title}</p>
+        <p style={{ fontSize:'13px', color:'#9ca3af', margin:0, lineHeight:1.6 }}>{desc}</p>
+      </div>
     </div>
   )
 }
 
-export function FlowStep(props) {
-  var circleClass = 'bg-slate-700 text-slate-400'
-  if (props.done)   { circleClass = 'bg-emerald-500 text-white' }
-  if (props.active) { circleClass = 'bg-blue-500 text-white animate-pulse' }
-
-  var wrapClass = 'opacity-20'
-  if (props.active) { wrapClass = 'opacity-100' }
-  if (props.done)   { wrapClass = 'opacity-60' }
-
-  var icon = props.done ? 'OK' : props.num
+// ─── StatCard ─────────────────────────────────────────────────────────────────
+export function StatCard({ label, value, sub, color }) {
+  var theme = {
+    cyan:    { accent:'#22d3ee', bg:'rgba(34,211,238,0.08)',  border:'rgba(34,211,238,0.2)'  },
+    violet:  { accent:'#a78bfa', bg:'rgba(167,139,250,0.08)', border:'rgba(167,139,250,0.2)' },
+    emerald: { accent:'#34d399', bg:'rgba(52,211,153,0.08)',  border:'rgba(52,211,153,0.2)'  },
+    amber:   { accent:'#fbbf24', bg:'rgba(251,191,36,0.08)',  border:'rgba(251,191,36,0.2)'  },
+  }[color] || { accent:'#818cf8', bg:'rgba(129,140,248,0.08)', border:'rgba(129,140,248,0.2)' }
 
   return (
-    <div className={'flex gap-3 items-start transition-all duration-500 ' + wrapClass}>
-      <div className={'w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold mt-0.5 ' + circleClass}>
-        {icon}
-      </div>
-      <div>
-        <p className="text-sm font-semibold text-slate-200">{props.title}</p>
-        <p className="text-xs text-slate-500 mt-0.5">{props.desc}</p>
-      </div>
+    <div style={{ borderRadius:'16px', padding:'16px', background:theme.bg, border:'1px solid '+theme.border }}>
+      <p style={{ fontSize:'11px', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.08em', color:theme.accent, opacity:0.85, margin:'0 0 8px' }}>{label}</p>
+      <p style={{ fontSize:'22px', fontWeight:900, color:theme.accent, margin:'0 0 4px', letterSpacing:'-0.5px' }}>{value}</p>
+      <p style={{ fontSize:'12px', color:'#9ca3af', margin:0 }}>{sub}</p>
+    </div>
+  )
+}
+
+// ─── Badge ─────────────────────────────────────────────────────────────────────
+export function Badge({ status }) {
+  var cfg = {
+    idle:       { label:'Disconnected',  color:'#6b7280', bg:'rgba(107,114,128,0.15)', dot:'#6b7280' },
+    connecting: { label:'Connecting...', color:'#fbbf24', bg:'rgba(251,191,36,0.15)',  dot:'#fbbf24' },
+    connected:  { label:'Connected',     color:'#34d399', bg:'rgba(52,211,153,0.15)',   dot:'#34d399' },
+    signing:    { label:'Signing...',    color:'#818cf8', bg:'rgba(129,140,248,0.15)',  dot:'#818cf8' },
+    sending:    { label:'Sending...',    color:'#818cf8', bg:'rgba(129,140,248,0.15)',  dot:'#818cf8' },
+    success:    { label:'Success!',      color:'#34d399', bg:'rgba(52,211,153,0.15)',   dot:'#34d399' },
+  }[status] || { label:'Unknown', color:'#6b7280', bg:'rgba(107,114,128,0.15)', dot:'#6b7280' }
+  return (
+    <div style={{ display:'inline-flex', alignItems:'center', gap:'7px', padding:'5px 12px', borderRadius:'20px', background:cfg.bg }}>
+      <span style={{ width:'7px', height:'7px', borderRadius:'50%', background:cfg.dot, boxShadow:'0 0 6px '+cfg.dot, display:'inline-block' }} />
+      <span style={{ fontSize:'12px', fontWeight:700, color:cfg.color }}>{cfg.label}</span>
     </div>
   )
 }

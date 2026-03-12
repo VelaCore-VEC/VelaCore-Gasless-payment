@@ -9,7 +9,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@web3modal/ethers": "^5.1.11",
     "ethers": "^6.11.1",
     "jsqr": "^1.4.0",
     "qrcode.react": "^4.2.0",

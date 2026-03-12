@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { ethers } from 'ethers'
 import { VEC_TOKEN_ADDRESS, PAYMASTER_ADDRESS, RELAY_SERVER_URL, LOGO_URL, BNB_TESTNET, VEC_ABI } from './config.js'
 import { signPermit, calcFee, shortAddr } from './helpers.js'
@@ -7,7 +7,6 @@ import TransactionHistory from './TransactionHistory.jsx'
 import QRModal from './QRModal.jsx'
 import ShareModal from './ShareModal.jsx'
 import CurrencyConverter from './CurrencyConverter.jsx'
-import { web3modal } from './walletconnect.js'
 
 // ─── Color System ───────────────────────────────────────────────────────────────
 // BG:       #0a0e1a   (deep navy)
@@ -125,73 +124,163 @@ function WalletIcon({ size }) {
   return (
     <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="2" y="5" width="20" height="14" rx="3"/>
-      <path d="M16 12h2"/>
-      <path d="M2 10h20"/>
+      <path d="M16 12h2"/><path d="M2 10h20"/>
     </svg>
   )
 }
 
-// ─── Wallet Selector Modal ──────────────────────────────────────────────────────
-// Shows popular wallets + WalletConnect QR option
-function WalletSelectorModal({ onClose, onSelect, status }) {
-  var wallets = [
-    { id:'metamask',   name:'MetaMask',        icon:'🦊', desc:'Browser extension & mobile', popular:true },
-    { id:'trust',      name:'Trust Wallet',    icon:'🛡️', desc:'Mobile & desktop',           popular:true },
-    { id:'coinbase',   name:'Coinbase Wallet', icon:'🔵', desc:'Easy crypto wallet',         popular:false },
-    { id:'walletconnect', name:'WalletConnect', icon:'🔗', desc:'Scan QR with any wallet',   popular:false },
-    { id:'rainbow',    name:'Rainbow',         icon:'🌈', desc:'Ethereum wallet',            popular:false },
-    { id:'other',      name:'Other Wallets',   icon:'➕', desc:'Browse 300+ wallets',       popular:false },
+// ─── EIP-6963 + Mobile Deep Link Wallet Modal ──────────────────────────────────
+function WalletSelectorModal({ onClose, onSelectProvider, onMobileDeepLink }) {
+  var [detected, setDetected] = React.useState([])
+  var [isMobile]  = React.useState(function(){ return /iPhone|iPad|Android/i.test(navigator.userAgent) })
+  var providerMap = React.useRef({})
+
+  React.useEffect(function() {
+    // EIP-6963: request all injected wallets
+    var found = []
+    function onAnnounce(e) {
+      var info = e.detail && e.detail.info
+      var prov = e.detail && e.detail.provider
+      if (!info || !info.uuid) return
+      if (!providerMap.current[info.uuid]) {
+        providerMap.current[info.uuid] = prov
+        found = found.filter(function(w){ return w.uuid !== info.uuid })
+        found.push({ uuid: info.uuid, name: info.name, icon: info.icon, rdns: info.rdns, provider: prov })
+        setDetected(function(){ return [...found] })
+      }
+    }
+    window.addEventListener('eip6963:announceProvider', onAnnounce)
+    window.dispatchEvent(new Event('eip6963:requestProvider'))
+
+    // Fallback: legacy window.ethereum (older MetaMask etc)
+    setTimeout(function() {
+      if (window.ethereum && found.length === 0) {
+        var name = window.ethereum.isMetaMask ? 'MetaMask' : window.ethereum.isTrust ? 'Trust Wallet' : 'Browser Wallet'
+        found.push({ uuid: 'legacy', name: name, icon: null, provider: window.ethereum })
+        setDetected([...found])
+      }
+    }, 150)
+
+    return function() { window.removeEventListener('eip6963:announceProvider', onAnnounce) }
+  }, [])
+
+  var mobileWallets = [
+    { id:'metamask', name:'MetaMask',     emoji:'🦊', color:'#F6851B',
+      link: 'https://metamask.app.link/dapp/' + window.location.host + window.location.pathname },
+    { id:'trust',    name:'Trust Wallet', emoji:'🛡️', color:'#3375BB',
+      link: 'https://link.trustwallet.com/open_url?coin_id=60&url=' + encodeURIComponent(window.location.href) },
+    { id:'coinbase', name:'Coinbase Wallet', emoji:'🔵', color:'#0052FF',
+      link: 'https://go.cb-wallet.com/dapp?url=' + encodeURIComponent(window.location.href) },
+    { id:'rainbow',  name:'Rainbow',      emoji:'🌈', color:'#7B3FE4',
+      link: 'https://rnbwapp.com/wc?uri=' + encodeURIComponent(window.location.href) },
   ]
 
+  var S = {
+    backdrop:  { position:'fixed', inset:0, zIndex:300, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' },
+    bg:        { position:'absolute', inset:0, background:'rgba(0,0,0,0.8)', backdropFilter:'blur(10px)' },
+    modal:     { position:'relative', zIndex:1, width:'100%', maxWidth:'400px', borderRadius:'24px',
+                 background:'#111827', border:'1px solid rgba(255,255,255,0.12)',
+                 boxShadow:'0 32px 80px rgba(0,0,0,0.7)', overflow:'hidden',
+                 animation:'receiptIn 0.28s cubic-bezier(0.34,1.56,0.64,1)' },
+    header:    { padding:'20px 20px 14px', borderBottom:'1px solid rgba(255,255,255,0.07)',
+                 display:'flex', alignItems:'center', justifyContent:'space-between' },
+    body:      { padding:'14px 16px 20px', maxHeight:'70vh', overflowY:'auto' },
+    row:       { display:'flex', alignItems:'center', gap:'12px', padding:'12px 14px',
+                 borderRadius:'14px', background:'rgba(255,255,255,0.04)',
+                 border:'1px solid rgba(255,255,255,0.08)', cursor:'pointer',
+                 transition:'all 0.15s', width:'100%', textAlign:'left', marginBottom:'8px' },
+    iconBox:   { width:'42px', height:'42px', borderRadius:'12px', background:'rgba(255,255,255,0.08)',
+                 display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, overflow:'hidden' },
+    badge:     { fontSize:'10px', fontWeight:800, color:'#4ade80', background:'rgba(74,222,128,0.15)',
+                 border:'1px solid rgba(74,222,128,0.3)', borderRadius:'20px', padding:'2px 7px' },
+    section:   { fontSize:'11px', fontWeight:700, color:'#6b7280', letterSpacing:'0.08em',
+                 padding:'8px 4px 6px', marginTop:'4px' },
+    closeBtn:  { width:'34px', height:'34px', borderRadius:'9px', background:'rgba(255,255,255,0.07)',
+                 border:'1px solid rgba(255,255,255,0.10)', color:'#9ca3af', cursor:'pointer',
+                 fontSize:'18px', display:'flex', alignItems:'center', justifyContent:'center' },
+  }
+
+  function hoverOn(e)  { e.currentTarget.style.background='rgba(99,102,241,0.13)'; e.currentTarget.style.borderColor='rgba(99,102,241,0.4)'; e.currentTarget.style.transform='translateX(2px)' }
+  function hoverOff(e) { e.currentTarget.style.background='rgba(255,255,255,0.04)'; e.currentTarget.style.borderColor='rgba(255,255,255,0.08)'; e.currentTarget.style.transform='none' }
+
   return (
-    <div style={{ position:'fixed', inset:0, zIndex:200, display:'flex', alignItems:'center', justifyContent:'center', padding:'20px' }}
-      onClick={function(e){ if(e.target===e.currentTarget) onClose() }}>
-      {/* Backdrop */}
-      <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.75)', backdropFilter:'blur(8px)' }} onClick={onClose} />
-
-      {/* Modal */}
-      <div style={{ position:'relative', zIndex:1, width:'100%', maxWidth:'420px', borderRadius:'24px', background:'#111827', border:'1px solid rgba(255,255,255,0.12)', boxShadow:'0 32px 80px rgba(0,0,0,0.7)', overflow:'hidden', animation:'receiptIn 0.3s cubic-bezier(0.34,1.56,0.64,1)' }}>
-
+    <div style={S.backdrop} onClick={function(e){ if(e.target===e.currentTarget) onClose() }}>
+      <div style={S.bg} onClick={onClose} />
+      <div style={S.modal}>
         {/* Header */}
-        <div style={{ padding:'22px 24px 16px', borderBottom:'1px solid rgba(255,255,255,0.08)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+        <div style={S.header}>
           <div>
-            <p style={{ fontSize:'18px', fontWeight:900, color:'#f9fafb', margin:0 }}>Connect Wallet</p>
-            <p style={{ fontSize:'13px', color:'#9ca3af', margin:'4px 0 0' }}>Choose your preferred wallet</p>
+            <p style={{ fontSize:'17px', fontWeight:900, color:'#f9fafb', margin:0 }}>Connect Wallet</p>
+            <p style={{ fontSize:'12px', color:'#6b7280', margin:'3px 0 0' }}>
+              {detected.length > 0 ? detected.length + ' wallet(s) detected' : isMobile ? 'Open your wallet app' : 'No wallets detected'}
+            </p>
           </div>
-          <button onClick={onClose} style={{ width:'36px', height:'36px', borderRadius:'10px', background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.12)', color:'#9ca3af', cursor:'pointer', fontSize:'18px', display:'flex', alignItems:'center', justifyContent:'center' }}>×</button>
+          <button style={S.closeBtn} onClick={onClose}>×</button>
         </div>
 
-        {/* Wallet list */}
-        <div style={{ padding:'16px 20px 20px', display:'flex', flexDirection:'column', gap:'8px' }}>
-          {wallets.map(function(w) {
-            return (
-              <button key={w.id} onClick={function(){ onSelect(w.id) }}
-                style={{ display:'flex', alignItems:'center', gap:'14px', padding:'14px 16px', borderRadius:'16px', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.09)', cursor:'pointer', transition:'all 0.18s', textAlign:'left', width:'100%' }}
-                onMouseEnter={function(e){ e.currentTarget.style.background='rgba(99,102,241,0.12)'; e.currentTarget.style.borderColor='rgba(99,102,241,0.35)'; e.currentTarget.style.transform='translateX(3px)' }}
-                onMouseLeave={function(e){ e.currentTarget.style.background='rgba(255,255,255,0.04)'; e.currentTarget.style.borderColor='rgba(255,255,255,0.09)'; e.currentTarget.style.transform='none' }}>
-                <div style={{ width:'44px', height:'44px', borderRadius:'14px', background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.1)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'22px', flexShrink:0 }}>
-                  {w.icon}
-                </div>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
-                    <p style={{ fontSize:'15px', fontWeight:700, color:'#f9fafb', margin:0 }}>{w.name}</p>
-                    {w.popular && <span style={{ fontSize:'10px', fontWeight:800, color:'#818cf8', background:'rgba(99,102,241,0.18)', border:'1px solid rgba(99,102,241,0.3)', borderRadius:'20px', padding:'2px 8px', letterSpacing:'0.05em' }}>POPULAR</span>}
-                  </div>
-                  <p style={{ fontSize:'12px', color:'#6b7280', margin:'3px 0 0' }}>{w.desc}</p>
-                </div>
-                <span style={{ fontSize:'18px', color:'#374151', flexShrink:0 }}>›</span>
-              </button>
-            )
-          })}
-        </div>
+        <div style={S.body}>
+          {/* Detected injected wallets (desktop mainly) */}
+          {detected.length > 0 && (
+            <>
+              <p style={S.section}>DETECTED ON THIS BROWSER</p>
+              {detected.map(function(w) {
+                return (
+                  <button key={w.uuid} style={S.row} onMouseEnter={hoverOn} onMouseLeave={hoverOff}
+                    onClick={function(){ onSelectProvider(w.provider, w.name) }}>
+                    <div style={S.iconBox}>
+                      {w.icon
+                        ? <img src={w.icon} alt={w.name} style={{ width:'28px', height:'28px', borderRadius:'8px' }} />
+                        : <span style={{ fontSize:'20px' }}>👛</span>}
+                    </div>
+                    <div style={{ flex:1 }}>
+                      <p style={{ fontSize:'14px', fontWeight:700, color:'#f9fafb', margin:0 }}>{w.name}</p>
+                      <p style={{ fontSize:'11px', color:'#6b7280', margin:'2px 0 0' }}>Ready to connect</p>
+                    </div>
+                    <span style={S.badge}>DETECTED</span>
+                  </button>
+                )
+              })}
+            </>
+          )}
 
-        {/* Footer */}
-        <div style={{ padding:'0 20px 20px', textAlign:'center' }}>
-          <p style={{ fontSize:'12px', color:'#374151', margin:0, lineHeight:1.6 }}>
-            By connecting you agree to our{' '}
-            <span style={{ color:'#818cf8', cursor:'pointer' }}>Terms of Service</span>
-            {' '}and{' '}
-            <span style={{ color:'#818cf8', cursor:'pointer' }}>Privacy Policy</span>
+          {/* Mobile deep links — always show on mobile, also on desktop as fallback */}
+          {(isMobile || detected.length === 0) && (
+            <>
+              <p style={S.section}>{isMobile ? 'OPEN WALLET APP' : 'INSTALL OR OPEN WALLET'}</p>
+              {mobileWallets.map(function(w) {
+                return (
+                  <button key={w.id} style={S.row} onMouseEnter={hoverOn} onMouseLeave={hoverOff}
+                    onClick={function(){ onMobileDeepLink(w.link, w.name) }}>
+                    <div style={{ ...S.iconBox, background: w.color + '22', border:'1px solid ' + w.color + '44' }}>
+                      <span style={{ fontSize:'22px' }}>{w.emoji}</span>
+                    </div>
+                    <div style={{ flex:1 }}>
+                      <p style={{ fontSize:'14px', fontWeight:700, color:'#f9fafb', margin:0 }}>{w.name}</p>
+                      <p style={{ fontSize:'11px', color:'#6b7280', margin:'2px 0 0' }}>
+                        {isMobile ? 'Tap to open app' : 'Click to install / open'}
+                      </p>
+                    </div>
+                    <span style={{ fontSize:'16px', color:'#4b5563' }}>↗</span>
+                  </button>
+                )
+              })}
+            </>
+          )}
+
+          {/* Empty state */}
+          {detected.length === 0 && !isMobile && (
+            <div style={{ textAlign:'center', padding:'16px 0 8px' }}>
+              <p style={{ fontSize:'13px', color:'#4b5563', lineHeight:1.6, margin:0 }}>
+                No wallet extension detected.<br/>
+                Install MetaMask or Coinbase Wallet,<br/>then refresh this page.
+              </p>
+            </div>
+          )}
+
+          {/* Footer note */}
+          <p style={{ fontSize:'11px', color:'#374151', textAlign:'center', marginTop:'12px', marginBottom:0, lineHeight:1.5 }}>
+            New to crypto?{' '}
+            <a href="https://metamask.io" target="_blank" rel="noreferrer" style={{ color:'#818cf8' }}>Get MetaMask free →</a>
           </p>
         </div>
       </div>
@@ -360,111 +449,86 @@ export default function App() {
     setHistoryLoading(false)
   },[])
 
-  // ── Universal Wallet Connect via Web3Modal ──────────────────────────────────
-  var connectingRef = useRef(false)
+  // ── Universal Wallet Connect — EIP-6963 + Mobile Deep Links ──────────────────
+  // No external dependencies, no Project ID needed
 
-  // Called after Web3Modal confirms a wallet is connected
-  var onWalletConnected = useCallback(async function(walletProvider){
-    if (!walletProvider) return
+  var connectWithProvider = useCallback(async function(rawProvider, walletName) {
+    setShowWalletModal(false)
+    setStatus('connecting')
     try {
-      var provider = new ethers.BrowserProvider(walletProvider)
-      // Switch to BNB Testnet
+      var provider = new ethers.BrowserProvider(rawProvider)
+      // Switch / add BNB Testnet
       try {
         await provider.send('wallet_switchEthereumChain', [{ chainId: BNB_TESTNET.chainId }])
       } catch(se) {
-        if (se.code === 4902 || se.code === -32603) {
-          try { await provider.send('wallet_addEthereumChain', [BNB_TESTNET]) } catch(e) {}
+        if (se.code === 4902 || se.code === -32603 || se.code === -32002) {
+          try {
+            await provider.send('wallet_addEthereumChain', [{
+              chainId:            BNB_TESTNET.chainId,
+              chainName:          BNB_TESTNET.chainName,
+              nativeCurrency:     BNB_TESTNET.nativeCurrency,
+              rpcUrls:            BNB_TESTNET.rpcUrls,
+              blockExplorerUrls:  BNB_TESTNET.blockExplorerUrls,
+            }])
+          } catch(addErr) {
+            throw new Error('Could not add BNB Testnet. Please add it manually in ' + (walletName||'your wallet') + '.')
+          }
+        } else if (se.code !== 4001) {
+          // Not user-rejected — try to continue anyway
+          console.warn('Chain switch warning:', se.message)
+        } else {
+          throw new Error('Please switch to BNB Testnet in ' + (walletName||'your wallet') + '.')
         }
       }
-      // Re-init provider after chain switch
-      provider = new ethers.BrowserProvider(walletProvider)
+      // Re-create provider after chain switch
+      provider = new ethers.BrowserProvider(rawProvider)
       var signer  = await provider.getSigner()
       var address = await signer.getAddress()
-      var w = { address, signer, provider }
+      var w = { address, signer, provider, rawProvider }
       setWallet(w); setStatus('connected'); setMobileMenu(false)
-      addToast('Wallet Connected!', shortAddr(address) + ' — BNB Testnet', 'success')
-      await loadBalance(w); await loadHistory(address)
+      addToast('Wallet Connected! 🎉', (walletName||'Wallet') + ' — ' + shortAddr(address), 'success')
+      await loadBalance(w)
+      await loadHistory(address)
     } catch(err) {
       addToast('Connection Failed', friendlyError(err.message), 'error')
       setStatus('idle')
     }
   }, [loadBalance, loadHistory])
 
-  // Subscribe to Web3Modal state changes
-  useEffect(function() {
-    // Check if already connected on mount
-    var state = web3modal.getState()
-    if (state.open === false) {
-      var walletProvider = web3modal.getWalletProvider()
-      if (walletProvider && !wallet) {
-        onWalletConnected(walletProvider)
+  var handleMobileDeepLink = useCallback(function(link, walletName) {
+    setShowWalletModal(false)
+    // Open wallet app — when user returns, window.ethereum should be injected
+    window.open(link, '_blank')
+    // Poll for ethereum injection after returning from wallet app
+    var attempts = 0
+    var poll = setInterval(function() {
+      attempts++
+      if (window.ethereum) {
+        clearInterval(poll)
+        addToast(walletName + ' detected!', 'Connecting...', 'info')
+        connectWithProvider(window.ethereum, walletName)
       }
-    }
-
-    var unsub = web3modal.subscribeProvider(function(providerState) {
-      if (providerState.isConnected && providerState.provider && !connectingRef.current) {
-        connectingRef.current = true
-        onWalletConnected(providerState.provider).finally(function() {
-          connectingRef.current = false
-        })
+      if (attempts > 20) {
+        clearInterval(poll)
+        addToast('Open ' + walletName, 'After installing, come back and tap Connect again.', 'info')
       }
-      if (!providerState.isConnected && wallet) {
-        setWallet(null); setBalance('0.00'); setRawBalance('0'); setStatus('idle')
-        setTxHistory([]); setStep(0); setFee(null); setResult(null)
-        setToAddr(''); setAmount(''); setPrefillNote('')
-        addToast('Wallet Disconnected', 'Session ended.', 'info')
-      }
-    })
-    return function() { if (unsub) unsub() }
-  }, [onWalletConnected])
+    }, 500)
+  }, [connectWithProvider])
 
   var connect = useCallback(function() {
     setShowWalletModal(true)
   }, [])
 
-  var handleWalletSelect = useCallback(function(walletId) {
-    setShowWalletModal(false)
-    setStatus('connecting')
-    // Open Web3Modal with optional filter
-    var opts = {}
-    if (walletId === 'walletconnect') opts = { view: 'ConnectingWalletConnect' }
-    web3modal.open(opts).catch(function(err) {
-      setStatus('idle')
-      // Fallback: try injected window.ethereum for MetaMask/Trust
-      if (window.ethereum) {
-        var provider = new ethers.BrowserProvider(window.ethereum)
-        provider.send('wallet_switchEthereumChain', [{ chainId: BNB_TESTNET.chainId }])
-          .catch(function(se) {
-            if (se.code === 4902 || se.code === -32603) {
-              return provider.send('wallet_addEthereumChain', [BNB_TESTNET])
-            }
-          })
-          .then(function() { return new ethers.BrowserProvider(window.ethereum).getSigner() })
-          .then(function(signer) { return signer.getAddress().then(function(address) { return { signer, address } }) })
-          .then(function(obj) {
-            var w = { address: obj.address, signer: obj.signer, provider: new ethers.BrowserProvider(window.ethereum) }
-            setWallet(w); setStatus('connected'); setMobileMenu(false)
-            addToast('Wallet Connected!', shortAddr(obj.address) + ' — BNB Testnet', 'success')
-            loadBalance(w); loadHistory(obj.address)
-          })
-          .catch(function(e) {
-            addToast('Connection Failed', friendlyError(e.message), 'error')
-            setStatus('idle')
-          })
-      } else {
-        addToast('No wallet found', 'Please install MetaMask or use a mobile wallet app.', 'warning')
-        setStatus('idle')
-      }
-    })
-  }, [loadBalance, loadHistory])
-
-  var disconnect = useCallback(async function(){
-    try { await web3modal.disconnect() } catch(e) {}
+  var disconnect = useCallback(function() {
+    // Try to revoke permissions (supported by some wallets)
+    if (wallet && wallet.rawProvider && wallet.rawProvider.request) {
+      wallet.rawProvider.request({ method:'wallet_revokePermissions', params:[{ eth_accounts:{} }] }).catch(function(){})
+    }
     setWallet(null); setBalance('0.00'); setRawBalance('0'); setStatus('idle')
     setTxHistory([]); setStep(0); setFee(null); setResult(null)
     setToAddr(''); setAmount(''); setPrefillNote(''); setMobileMenu(false)
     addToast('Disconnected', 'Wallet session ended.', 'info')
-  }, [])
+  }, [wallet])
 
   function fillMax(){
     var b = parseFloat(rawBalance)
@@ -589,9 +653,9 @@ export default function App() {
       {showHistory && <TransactionHistory transactions={txHistory} onClose={function(){ setShowHistory(false) }} />}
       {showWalletModal && (
         <WalletSelectorModal
-          status={status}
-          onClose={function(){ setShowWalletModal(false); if(status==='connecting') setStatus('idle') }}
-          onSelect={handleWalletSelect}
+          onClose={function(){ setShowWalletModal(false); setStatus('idle') }}
+          onSelectProvider={connectWithProvider}
+          onMobileDeepLink={handleMobileDeepLink}
         />
       )}
       {showQR && wallet && (

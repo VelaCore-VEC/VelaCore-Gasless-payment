@@ -1,0 +1,25 @@
+{
+  "version": 2,
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "functions": {
+    "api/relay.js": {
+      "maxDuration": 30
+    },
+    "api/status.js": {
+      "maxDuration": 10
+    },
+    "api/history/[address].js": {
+      "maxDuration": 10
+    }
+  },
+  "rewrites": [
+    { "source": "/api/relay",              "destination": "/api/relay" },
+    { "source": "/api/status",             "destination": "/api/status" },
+    { "source": "/api/history/:address",   "destination": "/api/history/[address]" }
+  ],
+  "env": {
+    "VITE_RELAY_BASE": ""
+  }
+}

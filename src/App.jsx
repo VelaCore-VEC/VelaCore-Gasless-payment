@@ -7,6 +7,7 @@ import TransactionHistory from './TransactionHistory.jsx'
 import QRModal from './QRModal.jsx'
 import ShareModal from './ShareModal.jsx'
 import CurrencyConverter from './CurrencyConverter.jsx'
+import { web3modal } from './walletconnect.js'
 
 // ─── Color System ───────────────────────────────────────────────────────────────
 // BG:       #0a0e1a   (deep navy)
@@ -22,15 +23,12 @@ function friendlyError(msg) {
   if (!msg) return 'Something went wrong. Please try again.'
   var m = msg.toLowerCase()
   if (m.includes('user rejected') || m.includes('user denied'))  return 'You cancelled the MetaMask signature.'
-  if (m.includes('insufficient') || m.includes('balance'))       return 'Insufficient VEC balance for this transfer.'
   if (m.includes('nonce'))                                        return 'Nonce error — refresh the page and retry.'
   if (m.includes('deadline') || m.includes('expired'))           return 'Signature expired — please try again.'
-  if (m.includes('fetch') || m.includes('failed to fetch'))      return 'Cannot reach relay server on port 3001.'
-  if (m.includes('relay server'))                                 return 'Relay error — check relayer BNB balance.'
-  if (m.includes('permit'))                                       return 'Permit failed — confirm you are on BNB Testnet.'
-  if (m.includes('invalid') && m.includes('address'))            return 'Invalid wallet address entered.'
+  if (m.includes('cannot reach') || m.includes('failed to fetch') || m.includes('networkerror')) return 'Cannot reach relay server — make sure it is running on port 3001.'
   if (m.includes('metamask') || m.includes('provider'))          return 'MetaMask not found — please install it.'
-  if (m.includes('chain') || m.includes('network'))              return 'Wrong network — switch to BNB Testnet.'
+  if (m.includes('wrong network') || m.includes('switch to bnb')) return 'Wrong network — switch to BNB Testnet.'
+  // For all other errors (including server errors) — show the REAL message
   return msg
 }
 
@@ -117,6 +115,86 @@ function Confetti({ active }) {
           }} />
         )
       })}
+    </div>
+  )
+}
+
+// ─── Wallet Icon SVG ──────────────────────────────────────────────────────────
+function WalletIcon({ size }) {
+  var s = size || 18
+  return (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="5" width="20" height="14" rx="3"/>
+      <path d="M16 12h2"/>
+      <path d="M2 10h20"/>
+    </svg>
+  )
+}
+
+// ─── Wallet Selector Modal ──────────────────────────────────────────────────────
+// Shows popular wallets + WalletConnect QR option
+function WalletSelectorModal({ onClose, onSelect, status }) {
+  var wallets = [
+    { id:'metamask',   name:'MetaMask',        icon:'🦊', desc:'Browser extension & mobile', popular:true },
+    { id:'trust',      name:'Trust Wallet',    icon:'🛡️', desc:'Mobile & desktop',           popular:true },
+    { id:'coinbase',   name:'Coinbase Wallet', icon:'🔵', desc:'Easy crypto wallet',         popular:false },
+    { id:'walletconnect', name:'WalletConnect', icon:'🔗', desc:'Scan QR with any wallet',   popular:false },
+    { id:'rainbow',    name:'Rainbow',         icon:'🌈', desc:'Ethereum wallet',            popular:false },
+    { id:'other',      name:'Other Wallets',   icon:'➕', desc:'Browse 300+ wallets',       popular:false },
+  ]
+
+  return (
+    <div style={{ position:'fixed', inset:0, zIndex:200, display:'flex', alignItems:'center', justifyContent:'center', padding:'20px' }}
+      onClick={function(e){ if(e.target===e.currentTarget) onClose() }}>
+      {/* Backdrop */}
+      <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.75)', backdropFilter:'blur(8px)' }} onClick={onClose} />
+
+      {/* Modal */}
+      <div style={{ position:'relative', zIndex:1, width:'100%', maxWidth:'420px', borderRadius:'24px', background:'#111827', border:'1px solid rgba(255,255,255,0.12)', boxShadow:'0 32px 80px rgba(0,0,0,0.7)', overflow:'hidden', animation:'receiptIn 0.3s cubic-bezier(0.34,1.56,0.64,1)' }}>
+
+        {/* Header */}
+        <div style={{ padding:'22px 24px 16px', borderBottom:'1px solid rgba(255,255,255,0.08)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <div>
+            <p style={{ fontSize:'18px', fontWeight:900, color:'#f9fafb', margin:0 }}>Connect Wallet</p>
+            <p style={{ fontSize:'13px', color:'#9ca3af', margin:'4px 0 0' }}>Choose your preferred wallet</p>
+          </div>
+          <button onClick={onClose} style={{ width:'36px', height:'36px', borderRadius:'10px', background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.12)', color:'#9ca3af', cursor:'pointer', fontSize:'18px', display:'flex', alignItems:'center', justifyContent:'center' }}>×</button>
+        </div>
+
+        {/* Wallet list */}
+        <div style={{ padding:'16px 20px 20px', display:'flex', flexDirection:'column', gap:'8px' }}>
+          {wallets.map(function(w) {
+            return (
+              <button key={w.id} onClick={function(){ onSelect(w.id) }}
+                style={{ display:'flex', alignItems:'center', gap:'14px', padding:'14px 16px', borderRadius:'16px', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.09)', cursor:'pointer', transition:'all 0.18s', textAlign:'left', width:'100%' }}
+                onMouseEnter={function(e){ e.currentTarget.style.background='rgba(99,102,241,0.12)'; e.currentTarget.style.borderColor='rgba(99,102,241,0.35)'; e.currentTarget.style.transform='translateX(3px)' }}
+                onMouseLeave={function(e){ e.currentTarget.style.background='rgba(255,255,255,0.04)'; e.currentTarget.style.borderColor='rgba(255,255,255,0.09)'; e.currentTarget.style.transform='none' }}>
+                <div style={{ width:'44px', height:'44px', borderRadius:'14px', background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.1)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'22px', flexShrink:0 }}>
+                  {w.icon}
+                </div>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                    <p style={{ fontSize:'15px', fontWeight:700, color:'#f9fafb', margin:0 }}>{w.name}</p>
+                    {w.popular && <span style={{ fontSize:'10px', fontWeight:800, color:'#818cf8', background:'rgba(99,102,241,0.18)', border:'1px solid rgba(99,102,241,0.3)', borderRadius:'20px', padding:'2px 8px', letterSpacing:'0.05em' }}>POPULAR</span>}
+                  </div>
+                  <p style={{ fontSize:'12px', color:'#6b7280', margin:'3px 0 0' }}>{w.desc}</p>
+                </div>
+                <span style={{ fontSize:'18px', color:'#374151', flexShrink:0 }}>›</span>
+              </button>
+            )
+          })}
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding:'0 20px 20px', textAlign:'center' }}>
+          <p style={{ fontSize:'12px', color:'#374151', margin:0, lineHeight:1.6 }}>
+            By connecting you agree to our{' '}
+            <span style={{ color:'#818cf8', cursor:'pointer' }}>Terms of Service</span>
+            {' '}and{' '}
+            <span style={{ color:'#818cf8', cursor:'pointer' }}>Privacy Policy</span>
+          </p>
+        </div>
+      </div>
     </div>
   )
 }
@@ -213,6 +291,7 @@ export default function App() {
   var [historyLoading, setHistoryLoading] = useState(false)
   var [serverOnline,   setServerOnline]   = useState(null)
   var [mobileMenu,     setMobileMenu]     = useState(false)
+  var [showWalletModal, setShowWalletModal] = useState(false)
   var [showConfetti,   setShowConfetti]   = useState(false)
   var [toasts,         setToasts]         = useState([])
   var toastId = useRef(0)
@@ -250,12 +329,13 @@ export default function App() {
 
   useEffect(function(){
     function ping(){
-      fetch('http://localhost:3001/status')
-        .then(function(r){ return r.json() })
-        .then(function(d){ setServerOnline(d.healthy!==false) })
+      // GET /api/relay returns {healthy:true} — simple status check
+      fetch(RELAY_SERVER_URL, { method:'GET' })
+        .then(function(r){ return r.ok ? r.json() : Promise.reject() })
+        .then(function(d){ setServerOnline(d.healthy !== false) })
         .catch(function(){ setServerOnline(false) })
     }
-    ping(); var iv=setInterval(ping,15000); return function(){ clearInterval(iv) }
+    ping(); var iv=setInterval(ping,20000); return function(){ clearInterval(iv) }
   },[])
 
   var loadBalance = useCallback(async function(w){
@@ -273,40 +353,118 @@ export default function App() {
     if(!addr) return
     setHistoryLoading(true)
     try{
-      var r = await fetch('http://localhost:3001/history/'+addr)
+      var r = await fetch(RELAY_SERVER_URL + '?history=' + addr)
       var d = await r.json()
       if(d.success) setTxHistory(d.history)
     } catch(e){}
     setHistoryLoading(false)
   },[])
 
-  var connect = useCallback(async function(){
-    if(!window.ethereum){ addToast('MetaMask Not Found','Please install MetaMask first.','error'); return }
-    setStatus('connecting')
-    try{
-      try{ await window.ethereum.request({method:'wallet_switchEthereumChain',params:[{chainId:BNB_TESTNET.chainId}]}) }
-      catch(se){
-        if(se.code===4902||se.code===-32603){
-          try{ await window.ethereum.request({method:'wallet_addEthereumChain',params:[BNB_TESTNET]}) }
-          catch(e){ throw new Error('Please switch to BNB Testnet manually.') }
-        } else throw new Error('Please switch to BNB Testnet manually.')
-      }
-      var provider = new ethers.BrowserProvider(window.ethereum)
-      var signer   = await provider.getSigner()
-      var address  = await signer.getAddress()
-      var w = {address,signer,provider}
-      setWallet(w); setStatus('connected'); setMobileMenu(false)
-      addToast('Wallet Connected!', shortAddr(address)+' — BNB Smart Chain Testnet', 'success')
-      await loadBalance(w); await loadHistory(address)
-    } catch(err){ addToast('Connection Failed', friendlyError(err.message), 'error'); setStatus('idle') }
-  },[loadBalance,loadHistory])
+  // ── Universal Wallet Connect via Web3Modal ──────────────────────────────────
+  var connectingRef = useRef(false)
 
-  var disconnect = useCallback(function(){
+  // Called after Web3Modal confirms a wallet is connected
+  var onWalletConnected = useCallback(async function(walletProvider){
+    if (!walletProvider) return
+    try {
+      var provider = new ethers.BrowserProvider(walletProvider)
+      // Switch to BNB Testnet
+      try {
+        await provider.send('wallet_switchEthereumChain', [{ chainId: BNB_TESTNET.chainId }])
+      } catch(se) {
+        if (se.code === 4902 || se.code === -32603) {
+          try { await provider.send('wallet_addEthereumChain', [BNB_TESTNET]) } catch(e) {}
+        }
+      }
+      // Re-init provider after chain switch
+      provider = new ethers.BrowserProvider(walletProvider)
+      var signer  = await provider.getSigner()
+      var address = await signer.getAddress()
+      var w = { address, signer, provider }
+      setWallet(w); setStatus('connected'); setMobileMenu(false)
+      addToast('Wallet Connected!', shortAddr(address) + ' — BNB Testnet', 'success')
+      await loadBalance(w); await loadHistory(address)
+    } catch(err) {
+      addToast('Connection Failed', friendlyError(err.message), 'error')
+      setStatus('idle')
+    }
+  }, [loadBalance, loadHistory])
+
+  // Subscribe to Web3Modal state changes
+  useEffect(function() {
+    // Check if already connected on mount
+    var state = web3modal.getState()
+    if (state.open === false) {
+      var walletProvider = web3modal.getWalletProvider()
+      if (walletProvider && !wallet) {
+        onWalletConnected(walletProvider)
+      }
+    }
+
+    var unsub = web3modal.subscribeProvider(function(providerState) {
+      if (providerState.isConnected && providerState.provider && !connectingRef.current) {
+        connectingRef.current = true
+        onWalletConnected(providerState.provider).finally(function() {
+          connectingRef.current = false
+        })
+      }
+      if (!providerState.isConnected && wallet) {
+        setWallet(null); setBalance('0.00'); setRawBalance('0'); setStatus('idle')
+        setTxHistory([]); setStep(0); setFee(null); setResult(null)
+        setToAddr(''); setAmount(''); setPrefillNote('')
+        addToast('Wallet Disconnected', 'Session ended.', 'info')
+      }
+    })
+    return function() { if (unsub) unsub() }
+  }, [onWalletConnected])
+
+  var connect = useCallback(function() {
+    setShowWalletModal(true)
+  }, [])
+
+  var handleWalletSelect = useCallback(function(walletId) {
+    setShowWalletModal(false)
+    setStatus('connecting')
+    // Open Web3Modal with optional filter
+    var opts = {}
+    if (walletId === 'walletconnect') opts = { view: 'ConnectingWalletConnect' }
+    web3modal.open(opts).catch(function(err) {
+      setStatus('idle')
+      // Fallback: try injected window.ethereum for MetaMask/Trust
+      if (window.ethereum) {
+        var provider = new ethers.BrowserProvider(window.ethereum)
+        provider.send('wallet_switchEthereumChain', [{ chainId: BNB_TESTNET.chainId }])
+          .catch(function(se) {
+            if (se.code === 4902 || se.code === -32603) {
+              return provider.send('wallet_addEthereumChain', [BNB_TESTNET])
+            }
+          })
+          .then(function() { return new ethers.BrowserProvider(window.ethereum).getSigner() })
+          .then(function(signer) { return signer.getAddress().then(function(address) { return { signer, address } }) })
+          .then(function(obj) {
+            var w = { address: obj.address, signer: obj.signer, provider: new ethers.BrowserProvider(window.ethereum) }
+            setWallet(w); setStatus('connected'); setMobileMenu(false)
+            addToast('Wallet Connected!', shortAddr(obj.address) + ' — BNB Testnet', 'success')
+            loadBalance(w); loadHistory(obj.address)
+          })
+          .catch(function(e) {
+            addToast('Connection Failed', friendlyError(e.message), 'error')
+            setStatus('idle')
+          })
+      } else {
+        addToast('No wallet found', 'Please install MetaMask or use a mobile wallet app.', 'warning')
+        setStatus('idle')
+      }
+    })
+  }, [loadBalance, loadHistory])
+
+  var disconnect = useCallback(async function(){
+    try { await web3modal.disconnect() } catch(e) {}
     setWallet(null); setBalance('0.00'); setRawBalance('0'); setStatus('idle')
     setTxHistory([]); setStep(0); setFee(null); setResult(null)
     setToAddr(''); setAmount(''); setPrefillNote(''); setMobileMenu(false)
-    addToast('Disconnected','Wallet session ended.','info')
-  },[])
+    addToast('Disconnected', 'Wallet session ended.', 'info')
+  }, [])
 
   function fillMax(){
     var b = parseFloat(rawBalance)
@@ -332,19 +490,27 @@ export default function App() {
       addToast('Broadcasting...','Transaction sent to BNB network.','info')
       var res, raw, data
       try {
-        res = await fetch(RELAY_SERVER_URL,{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({owner:wallet.address,to:toAddr,amount:wei.toString(),v:sig.v,r:sig.r,s:sig.s,deadline:sig.deadline})})
+        res = await fetch(RELAY_SERVER_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ owner:wallet.address, to:toAddr, amount:wei.toString(), v:sig.v, r:sig.r, s:sig.s, deadline:sig.deadline })
+        })
       } catch(fetchErr) {
-        throw new Error('Cannot reach relay server. Make sure it is running: cd paymaster-relay && node server.js')
+        throw new Error('Cannot reach relay server — make sure it is running: cd paymaster-relay && node server.js')
       }
       try {
         raw  = await res.text()
         data = JSON.parse(raw)
       } catch(e) {
-        console.error('[Relay] Non-JSON response:', raw && raw.slice(0,400))
-        throw new Error('Relay server error — check terminal. Is server.js running on port 3001?')
+        console.error('[Relay] Non-JSON response (first 400 chars):', raw && raw.slice(0,400))
+        throw new Error('Relay server returned invalid response. Check terminal for full error.')
       }
-      if(!res.ok || !data.success) throw new Error(data.error || data.hint || 'Relay server error.')
+      console.log('[Relay] Response:', res.status, data)
+      if (!res.ok || !data.success) {
+        var errMsg = data.error || data.hint || ('Server returned HTTP ' + res.status)
+        console.error('[Relay] Error:', errMsg)
+        throw new Error(errMsg)
+      }
       setStep(3); setStatus('success')
       setResult({hash:data.txHash,amount:parseFloat(amount),net:data.amountSent,feeVec:data.feeCollected})
       setShowConfetti(true)
@@ -421,6 +587,13 @@ export default function App() {
       <Confetti active={showConfetti} />
 
       {showHistory && <TransactionHistory transactions={txHistory} onClose={function(){ setShowHistory(false) }} />}
+      {showWalletModal && (
+        <WalletSelectorModal
+          status={status}
+          onClose={function(){ setShowWalletModal(false); if(status==='connecting') setStatus('idle') }}
+          onSelect={handleWalletSelect}
+        />
+      )}
       {showQR && wallet && (
         <QRModal address={wallet.address} balance={balance} onClose={function(){ setShowQR(false) }}
           onAddressScanned={function(a){ setToAddr(a); setShowQR(false); addToast('Address Scanned!', a.slice(0,10)+'...'+a.slice(-6)+' filled in.','success') }} />
@@ -484,10 +657,11 @@ export default function App() {
               </div>
             ) : (
               <button onClick={connect}
-                style={{ background:'linear-gradient(135deg,#4f46e5,#7c3aed)', color:'#fff', fontWeight:800, fontSize:'14px', padding:'10px 24px', borderRadius:'14px', border:'none', cursor:'pointer', boxShadow:'0 4px 24px rgba(79,70,229,0.4)', transition:'all 0.2s' }}
+                style={{ display:'flex', alignItems:'center', gap:'10px', background:'linear-gradient(135deg,#4f46e5,#7c3aed)', color:'#fff', fontWeight:800, fontSize:'14px', padding:'10px 20px', borderRadius:'14px', border:'none', cursor:'pointer', boxShadow:'0 4px 24px rgba(79,70,229,0.4)', transition:'all 0.2s' }}
                 onMouseEnter={function(e){ e.currentTarget.style.boxShadow='0 6px 32px rgba(79,70,229,0.6)'; e.currentTarget.style.transform='translateY(-1px)' }}
                 onMouseLeave={function(e){ e.currentTarget.style.boxShadow='0 4px 24px rgba(79,70,229,0.4)'; e.currentTarget.style.transform='none' }}>
-                Connect Wallet
+                <WalletIcon size={16} />
+                {status==='connecting' ? 'Opening...' : 'Connect Wallet'}
               </button>
             )}
           </div>
@@ -542,8 +716,9 @@ export default function App() {
               </>
             ) : (
               <button onClick={connect}
-                style={{ padding:'16px', borderRadius:'14px', fontWeight:800, fontSize:'15px', background:'linear-gradient(135deg,#4f46e5,#7c3aed)', color:'#fff', border:'none', cursor:'pointer', boxShadow:'0 4px 24px rgba(79,70,229,0.4)' }}>
-                Connect Wallet
+                style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:'10px', padding:'16px', borderRadius:'14px', fontWeight:800, fontSize:'15px', background:'linear-gradient(135deg,#4f46e5,#7c3aed)', color:'#fff', border:'none', cursor:'pointer', boxShadow:'0 4px 24px rgba(79,70,229,0.4)' }}>
+                <WalletIcon size={18} />
+                {status==='connecting' ? 'Opening Wallet Selector...' : 'Connect Wallet'}
               </button>
             )}
           </div>

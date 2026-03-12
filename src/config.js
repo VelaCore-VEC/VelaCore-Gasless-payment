@@ -3,8 +3,9 @@
 export const VEC_TOKEN_ADDRESS = '0x5172335bF34D96B541581B1f656d8fC2D94D3be8'
 export const PAYMASTER_ADDRESS  = '0x2e2B3D1979fFc20Df732b205391cDDfDeb9CE890'
 
-// Railway backend URL
-export const RELAY_SERVER_URL   = 'https://velacore-gasless-payment-production.up.railway.app/relay'
+// Vercel serverless — same domain, no CORS needed, no Railway needed!
+// /api/relay  →  api/relay.js  (auto by Vercel)
+export const RELAY_SERVER_URL = '/api/relay'
 
 export const LOGO_URL = 'https://velacore.github.io/VelaCore-DApp9/VelaCore-symbol-dark.svg'
 

@@ -1,3 +1,4 @@
+// VelaCoreAI.jsx — Vela, VelaCore Personal AI Assistant
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 
 var AI_ENDPOINT = '/api/ai'
@@ -18,9 +19,19 @@ function detectLang(text) {
   if (/[\u0600-\u06FF]/.test(text)) return 'ur'
   // Sindhi specific chars
   if (/[\u0621-\u063A]/.test(text) && /ڄ|ڃ|ٺ|ٻ|ڀ|ڦ|ڙ|ڍ|ڌ|ڏ|ڊ|ڈ/.test(text)) return 'sd'
-  // Roman Urdu keywords
-  var romanUr = /\b(hai|ha|hain|nahi|kya|kaise|mera|meri|mere|aap|tum|yeh|ye|woh|wo|ka|ki|ke|se|ko|bhi|or|aur|sab|kuch|karo|karo|kar|dena|lena|batao|batana|mujhe|humain|hum|ap|tha|thi|the|ho|hoga|hogi|hoge|kyun|kab|kahan|kitna|kitni)\b/i
-  if (romanUr.test(text)) return 'roman-ur'
+  // Roman Urdu — only words that are NEVER used in English
+  // Require at least 2 matches to avoid false positives
+  var urduOnly = [
+    'nahi','kya','kaise','mera','meri','mere','aap','tum',
+    'yeh','woh','aur','sab','kuch','karo','batao','batana',
+    'mujhe','humain','hum','hoga','hogi','hoge','kyun',
+    'kahan','kitna','kitni','phir','abhi','wala','wali',
+    'lagta','chahiye','milta','bhejo','bheja','rakho',
+    'dekho','samjho','pata','matlab','seedha'
+  ]
+  var lower   = text.toLowerCase()
+  var matches = urduOnly.filter(function(w){ return new RegExp('\\b'+w+'\\b').test(lower) })
+  if (matches.length >= 2) return 'roman-ur'
   return 'en'
 }
 
@@ -237,20 +248,25 @@ export default function VelaCoreAI({ wallet, balance, txHistory }) {
         title="Chat with Vela — VelaCore AI"
         style={{
           position:'fixed', bottom:'24px', right:'24px', zIndex:400,
-          width:'54px', height:'54px', borderRadius:'50%',
+          height:'48px', borderRadius:'28px',
+          paddingLeft:'18px', paddingRight:'20px',
           background:'linear-gradient(135deg,#4f46e5,#7c3aed)',
           border:'none', cursor:'pointer', color:'#fff',
-          display:'flex', alignItems:'center', justifyContent:'center',
+          display:'flex', alignItems:'center', gap:'9px',
+          boxShadow:'0 8px 32px rgba(79,70,229,0.6), 0 2px 8px rgba(0,0,0,0.4)',
           animation:'velaPulse 2.5s ease-in-out infinite',
           transition:'transform 0.15s',
         }}
-        onMouseEnter={function(e){ e.currentTarget.style.transform='scale(1.08)' }}
+        onMouseEnter={function(e){ e.currentTarget.style.transform='scale(1.05)' }}
         onMouseLeave={function(e){ e.currentTarget.style.transform='scale(1)' }}>
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
         </svg>
+        <span style={{ fontSize:'13px', fontWeight:700, letterSpacing:'0.01em', whiteSpace:'nowrap' }}>
+          Ask Vela
+        </span>
         {unread > 0 && (
-          <span style={{ position:'absolute', top:'-2px', right:'-2px', width:'18px', height:'18px', borderRadius:'50%', background:'#4ade80', border:'2px solid #0a0e1a', fontSize:'9px', fontWeight:900, color:'#0a0e1a', display:'flex', alignItems:'center', justifyContent:'center' }}>
+          <span style={{ width:'18px', height:'18px', borderRadius:'50%', background:'#4ade80', fontSize:'9px', fontWeight:900, color:'#0a0e1a', display:'flex', alignItems:'center', justifyContent:'center', marginLeft:'2px' }}>
             {unread > 9 ? '9+' : unread}
           </span>
         )}

@@ -1,137 +1,60 @@
-// VelaCoreAI.jsx — VelaCore Personal AI Assistant (Vela)
-// Features: Chat UI, Voice Input (STT), Voice Output (TTS), Tx Analysis
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 
 var AI_ENDPOINT = '/api/ai'
 
 var SUGGESTIONS = [
-  'Meri aaj ki transactions kitni hain?',
-  'Is week mein kitna VEC bheja?',
-  'Gasless payment kaise kaam karta hai?',
-  'Wallet connect nahi ho raha — help karo',
-  'Mere last 5 transactions dikhao',
-  'VEC token ke baare mein batao',
-  'Is month mein kitna fee diya?',
-  'Send VEC kaise karte hain?',
+  "How does gasless payment work?",
+  "Show my transaction history",
+  "How to send VEC?",
+  "What is VEC token?",
+  "Why is relay offline?",
+  "This week's transactions",
 ]
 
-// ── Styles ────────────────────────────────────────────────────────────────────
-var S = {
-  // Floating button
-  fab: {
-    position: 'fixed', bottom: '28px', right: '28px', zIndex: 400,
-    width: '60px', height: '60px', borderRadius: '50%',
-    background: 'linear-gradient(135deg,#4f46e5,#7c3aed)',
-    boxShadow: '0 8px 32px rgba(79,70,229,0.55)',
-    border: 'none', cursor: 'pointer', display: 'flex',
-    alignItems: 'center', justifyContent: 'center',
-    transition: 'all 0.2s', color: '#fff',
-  },
-  fabBadge: {
-    position: 'absolute', top: '0', right: '0',
-    width: '18px', height: '18px', borderRadius: '50%',
-    background: '#4ade80', border: '2px solid #0a0e1a',
-    fontSize: '9px', fontWeight: 900, color: '#0a0e1a',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-  },
-  // Panel
-  panel: {
-    position: 'fixed', bottom: '100px', right: '28px', zIndex: 399,
-    width: '380px', height: '580px', borderRadius: '24px',
-    background: '#111827', border: '1px solid rgba(255,255,255,0.12)',
-    boxShadow: '0 32px 80px rgba(0,0,0,0.7)',
-    display: 'flex', flexDirection: 'column', overflow: 'hidden',
-    animation: 'velaChatIn 0.3s cubic-bezier(0.34,1.56,0.64,1)',
-  },
-  panelMobile: {
-    position: 'fixed', inset: '0', zIndex: 399,
-    borderRadius: '0', width: '100%', height: '100%', bottom: '0', right: '0',
-  },
-  header: {
-    padding: '16px 18px', background: 'linear-gradient(135deg,rgba(79,70,229,0.25),rgba(124,58,237,0.15))',
-    borderBottom: '1px solid rgba(255,255,255,0.08)',
-    display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0,
-  },
-  avatar: {
-    width: '40px', height: '40px', borderRadius: '50%',
-    background: 'linear-gradient(135deg,#4f46e5,#7c3aed)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontSize: '18px', flexShrink: 0, boxShadow: '0 4px 12px rgba(79,70,229,0.4)',
-  },
-  messages: {
-    flex: 1, overflowY: 'auto', padding: '16px 14px', display: 'flex',
-    flexDirection: 'column', gap: '10px',
-    scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.1) transparent',
-  },
-  msgUser: {
-    alignSelf: 'flex-end', maxWidth: '80%',
-    background: 'linear-gradient(135deg,#4f46e5,#7c3aed)',
-    color: '#fff', borderRadius: '18px 18px 4px 18px',
-    padding: '10px 14px', fontSize: '13.5px', lineHeight: 1.5,
-    boxShadow: '0 4px 12px rgba(79,70,229,0.3)',
-  },
-  msgAI: {
-    alignSelf: 'flex-start', maxWidth: '85%',
-    background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.09)',
-    color: '#e5e7eb', borderRadius: '18px 18px 18px 4px',
-    padding: '10px 14px', fontSize: '13.5px', lineHeight: 1.6,
-  },
-  suggestions: {
-    padding: '8px 14px 10px', borderTop: '1px solid rgba(255,255,255,0.06)',
-    display: 'flex', gap: '6px', flexWrap: 'nowrap', overflowX: 'auto',
-    scrollbarWidth: 'none', flexShrink: 0,
-  },
-  sugChip: {
-    flexShrink: 0, fontSize: '11.5px', padding: '6px 11px',
-    borderRadius: '20px', background: 'rgba(99,102,241,0.12)',
-    border: '1px solid rgba(99,102,241,0.25)', color: '#a5b4fc',
-    cursor: 'pointer', whiteSpace: 'nowrap', transition: 'all 0.15s',
-  },
-  inputRow: {
-    padding: '12px 14px', borderTop: '1px solid rgba(255,255,255,0.08)',
-    display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0,
-    background: '#0d1420',
-  },
-  input: {
-    flex: 1, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)',
-    borderRadius: '14px', padding: '10px 14px', color: '#f9fafb', fontSize: '13.5px',
-    outline: 'none', resize: 'none', fontFamily: 'inherit', lineHeight: 1.4,
-    maxHeight: '80px', overflowY: 'auto',
-  },
-  iconBtn: {
-    width: '40px', height: '40px', borderRadius: '12px', border: 'none',
-    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-    flexShrink: 0, transition: 'all 0.15s', fontSize: '16px',
-  },
+// Detect language from user message
+function detectLang(text) {
+  if (!text) return 'en'
+  // Urdu script (Arabic unicode range)
+  if (/[\u0600-\u06FF]/.test(text)) return 'ur'
+  // Sindhi specific chars
+  if (/[\u0621-\u063A]/.test(text) && /ڄ|ڃ|ٺ|ٻ|ڀ|ڦ|ڙ|ڍ|ڌ|ڏ|ڊ|ڈ/.test(text)) return 'sd'
+  // Roman Urdu keywords
+  var romanUr = /\b(hai|ha|hain|nahi|kya|kaise|mera|meri|mere|aap|tum|yeh|ye|woh|wo|ka|ki|ke|se|ko|bhi|or|aur|sab|kuch|karo|karo|kar|dena|lena|batao|batana|mujhe|humain|hum|ap|tha|thi|the|ho|hoga|hogi|hoge|kyun|kab|kahan|kitna|kitni)\b/i
+  if (romanUr.test(text)) return 'roman-ur'
+  return 'en'
 }
 
-// ── Typing indicator ─────────────────────────────────────────────────────────
-function TypingDots() {
-  return (
-    <div style={{ ...S.msgAI, padding: '12px 16px', display: 'flex', gap: '5px', alignItems: 'center' }}>
-      {[0,1,2].map(function(i) {
-        return <span key={i} style={{
-          width: '7px', height: '7px', borderRadius: '50%', background: '#818cf8',
-          animation: 'velaDot 1.2s ' + (i*0.2) + 's ease-in-out infinite',
-        }} />
-      })}
-    </div>
-  )
+function getLangInstruction(lang) {
+  if (lang === 'ur')       return 'IMPORTANT: User wrote in Urdu script. Reply ONLY in Urdu script.'
+  if (lang === 'sd')       return 'IMPORTANT: User wrote in Sindhi. Reply ONLY in Sindhi.'
+  if (lang === 'roman-ur') return 'IMPORTANT: User wrote in Roman Urdu. Reply ONLY in Roman Urdu (Roman script, Urdu language, no Hindi words).'
+  return ''
 }
 
-// ── Message renderer — supports markdown-like bold/bullets ───────────────────
+// Auto-growing textarea hook
+function useAutoResize(ref, value) {
+  useEffect(function() {
+    if (!ref.current) return
+    ref.current.style.height = 'auto'
+    var h = Math.min(ref.current.scrollHeight, 120)
+    ref.current.style.height = h + 'px'
+  }, [value])
+}
+
+// Simple markdown → JSX
 function MsgText({ text }) {
-  var lines = text.split('\n')
   return (
-    <div>
-      {lines.map(function(line, i) {
-        if (!line.trim()) return <br key={i} />
-        var parts = line.split(/(\*\*[^*]+\*\*)/)
+    <div style={{ fontSize:'13.5px', lineHeight:1.65, color:'#e5e7eb' }}>
+      {text.split('\n').map(function(line, i) {
+        if (!line.trim()) return <div key={i} style={{ height:'6px' }} />
+        var parts = line.split(/(\*\*[^*]+\*\*|`[^`]+`)/)
         return (
-          <p key={i} style={{ margin: i===0?0:'6px 0 0' }}>
+          <p key={i} style={{ margin:0, marginTop: i > 0 ? '4px' : 0 }}>
             {parts.map(function(p, j) {
               if (p.startsWith('**') && p.endsWith('**'))
-                return <strong key={j} style={{ color: '#f9fafb' }}>{p.slice(2,-2)}</strong>
+                return <strong key={j} style={{ color:'#f9fafb', fontWeight:700 }}>{p.slice(2,-2)}</strong>
+              if (p.startsWith('`') && p.endsWith('`'))
+                return <code key={j} style={{ fontSize:'12px', background:'rgba(255,255,255,0.1)', padding:'1px 5px', borderRadius:'4px', color:'#a5b4fc' }}>{p.slice(1,-1)}</code>
               return p
             })}
           </p>
@@ -141,293 +64,322 @@ function MsgText({ text }) {
   )
 }
 
-// ── Main Component ────────────────────────────────────────────────────────────
+function TypingDots() {
+  return (
+    <div style={{ display:'flex', gap:'5px', alignItems:'center', padding:'6px 2px' }}>
+      {[0,1,2].map(function(i){
+        return <span key={i} style={{
+          width:'7px', height:'7px', borderRadius:'50%',
+          background:'#6366f1', opacity:0.7,
+          animation:'velaDot 1.2s '+(i*0.18)+'s ease-in-out infinite',
+          display:'inline-block',
+        }}/>
+      })}
+    </div>
+  )
+}
+
 export default function VelaCoreAI({ wallet, balance, txHistory }) {
-  var [open,       setOpen]       = useState(false)
-  var [messages,   setMessages]   = useState([])
-  var [input,      setInput]      = useState('')
-  var [loading,    setLoading]    = useState(false)
-  var [listening,  setListening]  = useState(false)
-  var [speaking,   setSpeaking]   = useState(false)
-  var [unread,     setUnread]     = useState(0)
-  var [voiceOn,    setVoiceOn]    = useState(true)
-  var [isMobile]                  = useState(function(){ return window.innerWidth < 640 })
+  var [open,      setOpen]      = useState(false)
+  var [msgs,      setMsgs]      = useState([])
+  var [input,     setInput]     = useState('')
+  var [loading,   setLoading]   = useState(false)
+  var [listening, setListening] = useState(false)
+  var [speaking,  setSpeaking]  = useState(false)
+  var [voiceOut,  setVoiceOut]  = useState(false)
+  var [unread,    setUnread]    = useState(0)
 
-  var bottomRef    = useRef(null)
-  var inputRef     = useRef(null)
-  var recogRef     = useRef(null)
-  var synthRef     = useRef(window.speechSynthesis)
+  var bottomRef = useRef(null)
+  var inputRef  = useRef(null)
+  var recogRef  = useRef(null)
 
-  // Greeting on first open
+  useAutoResize(inputRef, input)
+
+  // Initial greeting
   useEffect(function() {
-    if (messages.length === 0) {
-      var name  = wallet ? wallet.address.slice(0,8) + '...' : null
-      var greet = wallet
-        ? '👋 Salam! Main **Vela** hun — aapka VelaCore personal assistant!\n\nAapka wallet connect hai: `' + wallet.address.slice(0,10) + '...`\nBalance: **' + balance + ' VEC**\n\nMain aapki kaise madad kar sakta hun? Transactions, VEC bhejne ka tarika, ya koi bhi VelaCore sawaal — bas poochein! 🚀'
-        : '👋 Salam! Main **Vela** hun — aapka VelaCore personal assistant! 🌟\n\nMujhe VelaCore ecosystem ke baare mein har cheez pata hai. Wallet connect karein aur apni transactions bhi dekh sakte hain.\n\nKya jaanna chahte hain?'
-      setMessages([{ role: 'assistant', text: greet, id: Date.now() }])
-    }
+    if (msgs.length > 0) return
+    var greeting = wallet
+      ? 'Hi! I\'m **Vela**, your VelaCore assistant.\n\nWallet connected: `' + wallet.address.slice(0,10) + '...`\nBalance: **' + balance + ' VEC**\n\nAsk me anything about VelaCore!'
+      : 'Hi! I\'m **Vela**, your VelaCore assistant.\n\nConnect your wallet and I can show your transaction stats, help you send VEC, or answer any VelaCore question.'
+    setMsgs([{ role:'assistant', text:greeting, id:0 }])
   }, [])
 
-  // Auto scroll
+  // Update greeting balance when wallet changes
   useEffect(function() {
-    if (bottomRef.current) bottomRef.current.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, loading])
+    if (!wallet || msgs.length === 0) return
+    setMsgs(function(prev) {
+      var updated = [...prev]
+      if (updated[0] && updated[0].role === 'assistant') {
+        updated[0] = { ...updated[0],
+          text: 'Hi! I\'m **Vela**, your VelaCore assistant.\n\nWallet: `' + wallet.address.slice(0,10) + '...`\nBalance: **' + balance + ' VEC**\n\nAsk me anything about VelaCore!'
+        }
+      }
+      return updated
+    })
+  }, [wallet, balance])
 
-  // Unread badge
   useEffect(function() {
-    if (!open && messages.length > 1) setUnread(function(u){ return u + 1 })
-  }, [messages])
+    if (bottomRef.current) bottomRef.current.scrollIntoView({ behavior:'smooth' })
+  }, [msgs, loading])
 
   useEffect(function() {
-    if (open) setUnread(0)
-  }, [open])
+    if (!open && msgs.length > 1) setUnread(function(u){ return u+1 })
+  }, [msgs])
+  useEffect(function() { if (open) { setUnread(0); setTimeout(function(){ if(inputRef.current) inputRef.current.focus() }, 100) } }, [open])
 
-  // Build wallet context for API
   function buildContext() {
     if (!wallet) return null
-    return {
-      address:   wallet.address,
-      balance:   balance,
-      network:   'BNB Smart Chain Testnet',
-      txHistory: txHistory || [],
-    }
+    return { address: wallet.address, balance, network: 'BNB Smart Chain Testnet', txHistory: txHistory || [] }
   }
 
-  // Send message
-  var sendMessage = useCallback(async function(text) {
-    var txt = (text || input).trim()
+  var send = useCallback(async function(textOverride) {
+    var txt = (textOverride !== undefined ? textOverride : input).trim()
     if (!txt || loading) return
     setInput('')
 
-    var userMsg = { role: 'user', text: txt, id: Date.now() }
-    setMessages(function(prev) { return [...prev, userMsg] })
+    var lang        = detectLang(txt)
+    var langHint    = getLangInstruction(lang)
+    var fullText    = langHint ? langHint + '\n\n' + txt : txt
+
+    var userMsg = { role:'user', text:txt, id:Date.now() }
+    setMsgs(function(p){ return [...p, userMsg] })
     setLoading(true)
 
-    // Build messages array for API (only role+content, no id/text)
-    var apiMessages = messages
-      .filter(function(m) { return m.role === 'user' || m.role === 'assistant' })
-      .map(function(m) { return { role: m.role, content: m.text } })
-    apiMessages.push({ role: 'user', content: txt })
+    var apiMsgs = msgs
+      .filter(function(m){ return m.role==='user'||m.role==='assistant' })
+      .map(function(m){ return { role:m.role, content:m.text } })
+    apiMsgs.push({ role:'user', content:fullText })
 
     try {
       var res  = await fetch(AI_ENDPOINT, {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ messages: apiMessages, walletContext: buildContext() }),
+        headers: { 'Content-Type':'application/json' },
+        body:    JSON.stringify({ messages:apiMsgs, walletContext:buildContext() }),
       })
-      var data = await res.json()
-      if (!res.ok || !data.success) throw new Error(data.error || 'AI error')
+      var raw  = await res.text()
+      var data
+      try { data = JSON.parse(raw) } catch(e) { throw new Error('Server returned invalid response') }
 
-      var aiMsg = { role: 'assistant', text: data.reply, id: Date.now() }
-      setMessages(function(prev) { return [...prev, aiMsg] })
-      if (voiceOn) speak(data.reply)
+      if (!res.ok || !data.success) throw new Error(data.error || 'AI error (HTTP ' + res.status + ')')
+
+      var aiMsg = { role:'assistant', text:data.reply, id:Date.now() }
+      setMsgs(function(p){ return [...p, aiMsg] })
+      if (voiceOut) speak(data.reply)
 
     } catch(err) {
-      setMessages(function(prev) { return [...prev, {
-        role: 'assistant',
-        text: '⚠️ ' + (err.message || 'AI service unavailable. Please try again.'),
-        id: Date.now(),
-      }]})
+      setMsgs(function(p){ return [...p, { role:'assistant', text:'Sorry, something went wrong: ' + err.message, id:Date.now() }] })
     }
     setLoading(false)
-  }, [input, messages, loading, wallet, balance, txHistory, voiceOn])
+  }, [input, msgs, loading, wallet, balance, txHistory, voiceOut])
 
-  // Voice Input — Speech Recognition
-  var startListening = useCallback(function() {
-    var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (!SpeechRecognition) {
-      alert('Voice input not supported in this browser. Try Chrome or Edge.')
-      return
-    }
-    var recog = new SpeechRecognition()
-    recog.lang          = 'ur-PK'  // Urdu first, falls back to English
-    recog.interimResults = false
-    recog.maxAlternatives = 1
-
-    recog.onresult = function(e) {
-      var transcript = e.results[0][0].transcript
-      setInput(transcript)
-      setListening(false)
-    }
-    recog.onerror  = function() { setListening(false) }
-    recog.onend    = function() { setListening(false) }
-
-    recogRef.current = recog
-    recog.start()
+  // Speech recognition
+  var startListen = useCallback(function() {
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SR) { alert('Voice input not supported. Use Chrome or Edge.'); return }
+    var r = new SR()
+    r.continuous       = false
+    r.interimResults   = false
+    r.lang             = 'en-US'
+    r.onresult = function(e) { setInput(e.results[0][0].transcript); setListening(false) }
+    r.onerror  = function() { setListening(false) }
+    r.onend    = function() { setListening(false) }
+    recogRef.current = r
+    r.start()
     setListening(true)
   }, [])
 
-  var stopListening = useCallback(function() {
-    if (recogRef.current) recogRef.current.stop()
-    setListening(false)
-  }, [])
+  function stopListen() { if (recogRef.current) recogRef.current.stop(); setListening(false) }
 
-  // Voice Output — Speech Synthesis
   function speak(text) {
-    if (!synthRef.current) return
-    synthRef.current.cancel()
-    // Strip markdown symbols for clean speech
-    var clean = text.replace(/\*\*/g,'').replace(/`/g,'').replace(/#{1,3}\s/g,'')
-    var utt   = new SpeechSynthesisUtterance(clean.slice(0, 500)) // limit length
-    utt.lang  = 'en-US'
-    utt.rate  = 1.05
-    utt.pitch = 1.0
-    // Try to use a nicer voice if available
-    var voices = synthRef.current.getVoices()
-    var pref   = voices.find(function(v){ return v.name.includes('Google') && v.lang.startsWith('en') })
-                 || voices.find(function(v){ return v.lang.startsWith('en') })
-    if (pref) utt.voice = pref
-    utt.onstart = function() { setSpeaking(true) }
-    utt.onend   = function() { setSpeaking(false) }
-    utt.onerror = function() { setSpeaking(false) }
-    synthRef.current.speak(utt)
+    if (!window.speechSynthesis) return
+    window.speechSynthesis.cancel()
+    var clean = text.replace(/\*\*/g,'').replace(/`/g,'').slice(0,400)
+    var u = new SpeechSynthesisUtterance(clean)
+    u.lang  = 'en-US'; u.rate = 1.0
+    var vs  = window.speechSynthesis.getVoices()
+    var v   = vs.find(function(v){ return v.name.includes('Google') && v.lang.startsWith('en') }) || vs.find(function(v){ return v.lang.startsWith('en') })
+    if (v) u.voice = v
+    u.onstart = function(){ setSpeaking(true) }
+    u.onend   = function(){ setSpeaking(false) }
+    u.onerror = function(){ setSpeaking(false) }
+    window.speechSynthesis.speak(u)
+  }
+  function stopSpeak() { window.speechSynthesis && window.speechSynthesis.cancel(); setSpeaking(false) }
+
+  function onKey(e) { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); send() } }
+
+  var isMobile = window.innerWidth < 640
+
+  // Panel position
+  var panelStyle = {
+    position:'fixed',
+    bottom: isMobile ? 0 : '96px',
+    right:  isMobile ? 0 : '24px',
+    width:  isMobile ? '100%' : '370px',
+    height: isMobile ? '100dvh' : '560px',
+    zIndex: 500,
+    borderRadius: isMobile ? 0 : '20px',
+    background:'#111827',
+    border:'1px solid rgba(255,255,255,0.10)',
+    boxShadow:'0 24px 64px rgba(0,0,0,0.65)',
+    display:'flex', flexDirection:'column', overflow:'hidden',
+    animation:'velaChatIn 0.28s cubic-bezier(0.34,1.56,0.64,1)',
   }
 
-  function stopSpeaking() {
-    if (synthRef.current) synthRef.current.cancel()
-    setSpeaking(false)
-  }
-
-  function handleKey(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      sendMessage()
-    }
-  }
-
-  var panelStyle = isMobile
-    ? { ...S.panel, ...S.panelMobile }
-    : S.panel
-
-  if (!open) {
-    return (
-      <>
-        <style>{`
-          @keyframes velaChatIn { from{opacity:0;transform:scale(0.85) translateY(20px)} to{opacity:1;transform:scale(1) translateY(0)} }
-          @keyframes velaDot { 0%,80%,100%{transform:scale(0.6);opacity:0.4} 40%{transform:scale(1);opacity:1} }
-          @keyframes velaFabPulse { 0%,100%{box-shadow:0 8px 32px rgba(79,70,229,0.55)} 50%{box-shadow:0 8px 48px rgba(79,70,229,0.85),0 0 0 8px rgba(79,70,229,0.15)} }
-        `}</style>
-        <button style={{ ...S.fab, animation: 'velaFabPulse 2.5s ease-in-out infinite' }}
-          onClick={function(){ setOpen(true) }}
-          onMouseEnter={function(e){ e.currentTarget.style.transform='scale(1.1)' }}
-          onMouseLeave={function(e){ e.currentTarget.style.transform='scale(1)' }}
-          title="Chat with Vela — VelaCore AI">
-          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 2C6.48 2 2 6.48 2 12c0 1.85.5 3.58 1.38 5.06L2 22l4.94-1.38A9.96 9.96 0 0012 22c5.52 0 10-4.48 10-10S17.52 2 12 2z"/>
-            <path d="M8 10h.01M12 10h.01M16 10h.01" strokeWidth="2.5"/>
-          </svg>
-          {unread > 0 && <span style={S.fabBadge}>{unread > 9 ? '9+' : unread}</span>}
-        </button>
-      </>
-    )
-  }
+  if (!open) return (
+    <>
+      <style>{`
+        @keyframes velaChatIn{from{opacity:0;transform:scale(0.9) translateY(12px)}to{opacity:1;transform:scale(1) translateY(0)}}
+        @keyframes velaDot{0%,80%,100%{transform:scale(0.5);opacity:0.3}40%{transform:scale(1);opacity:1}}
+        @keyframes velaPulse{0%,100%{box-shadow:0 6px 28px rgba(79,70,229,0.5)}50%{box-shadow:0 6px 40px rgba(79,70,229,0.8),0 0 0 6px rgba(79,70,229,0.12)}}
+      `}</style>
+      <button onClick={function(){ setOpen(true) }}
+        title="Chat with Vela — VelaCore AI"
+        style={{
+          position:'fixed', bottom:'24px', right:'24px', zIndex:400,
+          width:'54px', height:'54px', borderRadius:'50%',
+          background:'linear-gradient(135deg,#4f46e5,#7c3aed)',
+          border:'none', cursor:'pointer', color:'#fff',
+          display:'flex', alignItems:'center', justifyContent:'center',
+          animation:'velaPulse 2.5s ease-in-out infinite',
+          transition:'transform 0.15s',
+        }}
+        onMouseEnter={function(e){ e.currentTarget.style.transform='scale(1.08)' }}
+        onMouseLeave={function(e){ e.currentTarget.style.transform='scale(1)' }}>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </svg>
+        {unread > 0 && (
+          <span style={{ position:'absolute', top:'-2px', right:'-2px', width:'18px', height:'18px', borderRadius:'50%', background:'#4ade80', border:'2px solid #0a0e1a', fontSize:'9px', fontWeight:900, color:'#0a0e1a', display:'flex', alignItems:'center', justifyContent:'center' }}>
+            {unread > 9 ? '9+' : unread}
+          </span>
+        )}
+      </button>
+    </>
+  )
 
   return (
     <>
       <style>{`
-        @keyframes velaChatIn { from{opacity:0;transform:scale(0.85) translateY(20px)} to{opacity:1;transform:scale(1) translateY(0)} }
-        @keyframes velaDot { 0%,80%,100%{transform:scale(0.6);opacity:0.4} 40%{transform:scale(1);opacity:1} }
-        .vela-msg-scroll::-webkit-scrollbar { width: 4px; }
-        .vela-msg-scroll::-webkit-scrollbar-track { background: transparent; }
-        .vela-msg-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius:4px; }
-        .vela-sug:hover { background: rgba(99,102,241,0.22) !important; border-color: rgba(99,102,241,0.4) !important; }
+        @keyframes velaChatIn{from{opacity:0;transform:scale(0.9) translateY(12px)}to{opacity:1;transform:scale(1) translateY(0)}}
+        @keyframes velaDot{0%,80%,100%{transform:scale(0.5);opacity:0.3}40%{transform:scale(1);opacity:1}}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        .vela-scroll::-webkit-scrollbar{width:3px}
+        .vela-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.08);border-radius:4px}
+        .vela-input:focus{border-color:rgba(99,102,241,0.5)!important;outline:none}
+        .vela-sug:hover{background:rgba(99,102,241,0.18)!important;color:#c4b5fd!important}
+        .vela-icon-btn:hover{opacity:0.8}
       `}</style>
 
       <div style={panelStyle}>
-        {/* Header */}
-        <div style={S.header}>
-          <div style={S.avatar}>🌟</div>
+
+        {/* ── Header ── */}
+        <div style={{ padding:'14px 16px', borderBottom:'1px solid rgba(255,255,255,0.07)', display:'flex', alignItems:'center', gap:'10px', flexShrink:0 }}>
+          <div style={{ width:'36px', height:'36px', borderRadius:'50%', background:'linear-gradient(135deg,#4f46e5,#7c3aed)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'16px', flexShrink:0 }}>
+            ✦
+          </div>
           <div style={{ flex:1 }}>
-            <p style={{ fontSize:'15px', fontWeight:900, color:'#f9fafb', margin:0 }}>Vela AI</p>
-            <p style={{ fontSize:'11px', color:'#4ade80', margin:'2px 0 0', display:'flex', alignItems:'center', gap:'5px' }}>
-              <span style={{ width:'6px', height:'6px', borderRadius:'50%', background:'#4ade80', display:'inline-block' }} />
-              VelaCore Personal Assistant
+            <p style={{ margin:0, fontSize:'14px', fontWeight:800, color:'#f9fafb', letterSpacing:'-0.01em' }}>Vela</p>
+            <p style={{ margin:0, fontSize:'11px', color:'#4ade80', display:'flex', alignItems:'center', gap:'4px' }}>
+              <span style={{ width:'5px', height:'5px', borderRadius:'50%', background:'#4ade80', display:'inline-block' }}/>
+              VelaCore AI
             </p>
           </div>
-          {/* Voice toggle */}
-          <button style={{ ...S.iconBtn, background: voiceOn ? 'rgba(74,222,128,0.15)' : 'rgba(255,255,255,0.06)',
-            border: voiceOn ? '1px solid rgba(74,222,128,0.3)' : '1px solid rgba(255,255,255,0.1)',
-            color: voiceOn ? '#4ade80' : '#6b7280', fontSize:'14px' }}
-            onClick={function(){ setVoiceOn(!voiceOn); stopSpeaking() }}
-            title={voiceOn ? 'Voice On (click to mute)' : 'Voice Off (click to enable)'}>
-            {voiceOn ? '🔊' : '🔇'}
+
+          {/* Voice output toggle */}
+          <button className="vela-icon-btn" title={voiceOut ? 'Voice on' : 'Voice off'}
+            onClick={function(){ setVoiceOut(!voiceOut); stopSpeak() }}
+            style={{ width:'32px', height:'32px', borderRadius:'9px', border:'1px solid rgba(255,255,255,0.09)', background: voiceOut ? 'rgba(74,222,128,0.12)' : 'rgba(255,255,255,0.05)', color: voiceOut ? '#4ade80' : '#4b5563', cursor:'pointer', fontSize:'14px', display:'flex', alignItems:'center', justifyContent:'center' }}>
+            {speaking ? <span style={{ fontSize:'12px', color:'#818cf8' }}>⏹</span> : (voiceOut ? '🔊' : '🔇')}
           </button>
-          {/* Speaking indicator */}
-          {speaking && (
-            <button style={{ ...S.iconBtn, background:'rgba(99,102,241,0.15)', border:'1px solid rgba(99,102,241,0.3)', color:'#818cf8', fontSize:'13px' }}
-              onClick={stopSpeaking} title="Stop speaking">⏹</button>
-          )}
+
           {/* Close */}
-          <button style={{ ...S.iconBtn, background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', color:'#9ca3af' }}
-            onClick={function(){ setOpen(false); stopSpeaking() }}>✕</button>
+          <button className="vela-icon-btn"
+            onClick={function(){ setOpen(false); stopSpeak() }}
+            style={{ width:'32px', height:'32px', borderRadius:'9px', border:'1px solid rgba(255,255,255,0.09)', background:'rgba(255,255,255,0.05)', color:'#6b7280', cursor:'pointer', fontSize:'16px', display:'flex', alignItems:'center', justifyContent:'center' }}>
+            ✕
+          </button>
         </div>
 
-        {/* Messages */}
-        <div className="vela-msg-scroll" style={S.messages}>
-          {messages.map(function(msg) {
+        {/* ── Messages ── */}
+        <div className="vela-scroll" style={{ flex:1, overflowY:'auto', padding:'14px 14px 6px', display:'flex', flexDirection:'column', gap:'8px' }}>
+          {msgs.map(function(msg) {
+            var isUser = msg.role === 'user'
             return (
-              <div key={msg.id} style={msg.role === 'user' ? S.msgUser : S.msgAI}>
-                {msg.role === 'assistant'
-                  ? <MsgText text={msg.text} />
-                  : msg.text}
+              <div key={msg.id} style={{
+                alignSelf: isUser ? 'flex-end' : 'flex-start',
+                maxWidth: '82%',
+                background: isUser ? 'linear-gradient(135deg,#4f46e5,#6d28d9)' : 'rgba(255,255,255,0.055)',
+                border: isUser ? 'none' : '1px solid rgba(255,255,255,0.08)',
+                borderRadius: isUser ? '16px 16px 3px 16px' : '16px 16px 16px 3px',
+                padding:'10px 13px',
+                color: isUser ? '#fff' : '#e5e7eb',
+                fontSize:'13.5px', lineHeight:1.6,
+              }}>
+                {isUser ? msg.text : <MsgText text={msg.text} />}
               </div>
             )
           })}
-          {loading && <TypingDots />}
+          {loading && (
+            <div style={{ alignSelf:'flex-start', background:'rgba(255,255,255,0.055)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'16px 16px 16px 3px', padding:'10px 16px' }}>
+              <TypingDots />
+            </div>
+          )}
           <div ref={bottomRef} />
         </div>
 
-        {/* Suggestions */}
-        <div style={S.suggestions}>
-          {SUGGESTIONS.slice(0, 6).map(function(s, i) {
-            return (
-              <button key={i} className="vela-sug" style={S.sugChip}
-                onClick={function(){ sendMessage(s) }}>
-                {s}
-              </button>
-            )
-          })}
-        </div>
+        {/* ── Suggestions ── */}
+        {msgs.length <= 2 && (
+          <div style={{ padding:'8px 14px', display:'flex', gap:'6px', overflowX:'auto', flexShrink:0, scrollbarWidth:'none' }}>
+            {SUGGESTIONS.map(function(s, i) {
+              return (
+                <button key={i} className="vela-sug"
+                  onClick={function(){ send(s) }}
+                  style={{ flexShrink:0, fontSize:'11.5px', padding:'5px 10px', borderRadius:'20px', background:'rgba(99,102,241,0.09)', border:'1px solid rgba(99,102,241,0.2)', color:'#818cf8', cursor:'pointer', whiteSpace:'nowrap', transition:'all 0.15s' }}>
+                  {s}
+                </button>
+              )
+            })}
+          </div>
+        )}
 
-        {/* Input */}
-        <div style={S.inputRow}>
-          {/* Voice input button */}
-          <button
-            style={{ ...S.iconBtn,
-              background: listening ? 'rgba(239,68,68,0.2)' : 'rgba(255,255,255,0.06)',
-              border: listening ? '1px solid rgba(239,68,68,0.4)' : '1px solid rgba(255,255,255,0.1)',
-              color: listening ? '#ef4444' : '#9ca3af',
-              animation: listening ? 'velaFabPulse 1s infinite' : 'none',
-            }}
-            onClick={listening ? stopListening : startListening}
-            title={listening ? 'Stop recording' : 'Voice input (Urdu/English)'}>
+        {/* ── Input ── */}
+        <div style={{ padding:'10px 12px', borderTop:'1px solid rgba(255,255,255,0.07)', display:'flex', alignItems:'flex-end', gap:'7px', flexShrink:0, background:'rgba(0,0,0,0.2)' }}>
+
+          {/* Mic */}
+          <button className="vela-icon-btn"
+            onClick={listening ? stopListen : startListen}
+            title={listening ? 'Stop' : 'Voice input'}
+            style={{ width:'36px', height:'36px', borderRadius:'10px', flexShrink:0, border: listening ? '1px solid rgba(239,68,68,0.4)' : '1px solid rgba(255,255,255,0.09)', background: listening ? 'rgba(239,68,68,0.12)' : 'rgba(255,255,255,0.05)', color: listening ? '#ef4444' : '#6b7280', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'15px', marginBottom:'1px' }}>
             {listening ? '⏹' : '🎙️'}
           </button>
 
+          {/* Textarea — auto grows */}
           <textarea
             ref={inputRef}
-            style={S.input}
+            className="vela-input"
             value={input}
             onChange={function(e){ setInput(e.target.value) }}
-            onKeyDown={handleKey}
-            placeholder={listening ? '🎙️ Sun raha hun...' : 'Kuch bhi poochein VelaCore ke baare mein...'}
+            onKeyDown={onKey}
+            placeholder={listening ? 'Listening...' : 'Ask anything about VelaCore...'}
             rows={1}
+            style={{
+              flex:1, background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.11)',
+              borderRadius:'12px', padding:'9px 12px', color:'#f9fafb', fontSize:'13.5px',
+              resize:'none', fontFamily:'inherit', lineHeight:1.5, overflowY:'hidden',
+              transition:'border-color 0.15s', minHeight:'38px', maxHeight:'120px',
+            }}
           />
 
+          {/* Send */}
           <button
-            style={{ ...S.iconBtn,
-              background: (input.trim() && !loading) ? 'linear-gradient(135deg,#4f46e5,#7c3aed)' : 'rgba(255,255,255,0.06)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              color: (input.trim() && !loading) ? '#fff' : '#4b5563',
-              cursor: (input.trim() && !loading) ? 'pointer' : 'default',
-            }}
-            onClick={function(){ sendMessage() }}
+            onClick={function(){ send() }}
             disabled={!input.trim() || loading}
-            title="Send">
+            style={{ width:'36px', height:'36px', borderRadius:'10px', flexShrink:0, border:'none', background: (input.trim() && !loading) ? 'linear-gradient(135deg,#4f46e5,#7c3aed)' : 'rgba(255,255,255,0.06)', color: (input.trim() && !loading) ? '#fff' : '#374151', cursor: (input.trim() && !loading) ? 'pointer' : 'default', display:'flex', alignItems:'center', justifyContent:'center', transition:'all 0.15s', marginBottom:'1px' }}>
             {loading
-              ? <span style={{ width:'16px', height:'16px', border:'2px solid rgba(255,255,255,0.3)', borderTopColor:'#818cf8', borderRadius:'50%', animation:'spin 0.8s linear infinite', display:'block' }} />
-              : '➤'}
+              ? <span style={{ width:'14px', height:'14px', border:'2px solid rgba(255,255,255,0.2)', borderTopColor:'#818cf8', borderRadius:'50%', animation:'spin 0.7s linear infinite', display:'block' }}/>
+              : <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
+            }
           </button>
         </div>
       </div>

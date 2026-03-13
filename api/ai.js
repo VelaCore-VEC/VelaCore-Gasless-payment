@@ -1,167 +1,151 @@
-// api/ai.js — VelaCore AI Assistant (Vercel Serverless Function)
-// Requires: ANTHROPIC_API_KEY in Vercel Environment Variables
+const https = require('https')
+
+function httpsPost(options, body) {
+  return new Promise(function(resolve, reject) {
+    var req = https.request(options, function(res) {
+      var data = ''
+      res.on('data', function(chunk) { data += chunk })
+      res.on('end',  function() {
+        try { resolve({ status: res.statusCode, body: JSON.parse(data) }) }
+        catch(e) { resolve({ status: res.statusCode, body: data }) }
+      })
+    })
+    req.on('error', reject)
+    req.write(body)
+    req.end()
+  })
+}
 
 module.exports = async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Origin',  '*')
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
   if (req.method === 'OPTIONS') return res.status(200).end()
   if (req.method !== 'POST')   return res.status(405).json({ error: 'Method not allowed' })
 
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return res.status(500).json({ error: 'ANTHROPIC_API_KEY not set in Vercel environment variables.' })
-  }
+  var apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) return res.status(500).json({
+    success: false,
+    error: 'ANTHROPIC_API_KEY not set in Vercel → Settings → Environment Variables'
+  })
 
-  const { messages, walletContext } = req.body || {}
-  if (!messages || !Array.isArray(messages)) {
-    return res.status(400).json({ error: 'messages array required' })
-  }
+  var body = req.body || {}
+  var messages = body.messages
+  var wc = body.walletContext || null
 
-  // Build wallet context string for system prompt
+  if (!messages || !Array.isArray(messages) || messages.length === 0)
+    return res.status(400).json({ success: false, error: 'messages array required' })
+
   var ctxLines = []
-  if (walletContext) {
-    var wc = walletContext
-    if (wc.address)   ctxLines.push('Connected Wallet: ' + wc.address)
-    if (wc.balance)   ctxLines.push('VEC Balance: ' + wc.balance + ' VEC')
-    if (wc.network)   ctxLines.push('Network: ' + wc.network)
+  if (wc) {
+    if (wc.address) ctxLines.push('Wallet: ' + wc.address)
+    if (wc.balance) ctxLines.push('VEC Balance: ' + wc.balance + ' VEC')
+    ctxLines.push('Network: BNB Smart Chain Testnet')
 
-    if (wc.txHistory && wc.txHistory.length > 0) {
-      var now     = Date.now()
-      var dayMs   = 86400000
-      var weekMs  = 7  * dayMs
-      var monthMs = 30 * dayMs
+    var history = wc.txHistory || []
+    if (history.length > 0) {
+      var now      = Date.now()
+      var DAY      = 86400000
+      var todayTx  = history.filter(function(t){ return now - t.timestamp < DAY })
+      var weekTx   = history.filter(function(t){ return now - t.timestamp < DAY*7 })
+      var monthTx  = history.filter(function(t){ return now - t.timestamp < DAY*30 })
+      var sum      = function(arr, k){ return arr.reduce(function(s,t){ return s+parseFloat(t[k]||0) },0).toFixed(2) }
 
-      var todayTx = wc.txHistory.filter(function(t){ return now - t.timestamp < dayMs })
-      var weekTx  = wc.txHistory.filter(function(t){ return now - t.timestamp < weekMs })
-      var monthTx = wc.txHistory.filter(function(t){ return now - t.timestamp < monthMs })
+      ctxLines.push('--- Stats ---')
+      ctxLines.push('Today: '      + todayTx.length + ' txs, ' + sum(todayTx,'amount')  + ' VEC sent')
+      ctxLines.push('This week: '  + weekTx.length  + ' txs, ' + sum(weekTx,'amount')   + ' VEC sent')
+      ctxLines.push('This month: ' + monthTx.length + ' txs, ' + sum(monthTx,'amount')  + ' VEC sent')
+      ctxLines.push('All-time: '   + history.length + ' txs, ' + sum(history,'amount')  + ' VEC sent')
+      ctxLines.push('Total fees: ' + sum(history,'feeVec') + ' VEC')
 
-      function sumAmount(arr) { return arr.reduce(function(s,t){ return s + parseFloat(t.amount||0) },0).toFixed(2) }
-      function sumReceived(arr) { return arr.reduce(function(s,t){ return s + parseFloat(t.net||0) },0).toFixed(2) }
-
-      ctxLines.push('--- Transaction Summary ---')
-      ctxLines.push('Today:    ' + todayTx.length + ' txs | Sent: ' + sumAmount(todayTx) + ' VEC')
-      ctxLines.push('This Week: ' + weekTx.length  + ' txs | Sent: ' + sumAmount(weekTx)  + ' VEC')
-      ctxLines.push('This Month:' + monthTx.length + ' txs | Sent: ' + sumAmount(monthTx) + ' VEC')
-      ctxLines.push('All-time:  ' + wc.txHistory.length + ' txs | Sent: ' + sumAmount(wc.txHistory) + ' VEC')
-
-      // Last 5 transactions detail
       ctxLines.push('--- Last 5 Transactions ---')
-      wc.txHistory.slice(0, 5).forEach(function(t, i) {
-        var date = new Date(t.timestamp).toLocaleString('en-PK', { timeZone: 'Asia/Karachi' })
-        ctxLines.push(
-          (i+1) + '. ' + date +
-          ' | Sent: ' + parseFloat(t.amount).toFixed(2) + ' VEC' +
-          ' | To: ' + (t.to ? t.to.slice(0,10) + '...' : 'unknown') +
-          ' | Fee: ' + parseFloat(t.feeVec||0).toFixed(4) + ' VEC' +
-          ' | Hash: ' + (t.hash ? t.hash.slice(0,12) + '...' : 'N/A')
-        )
+      history.slice(0,5).forEach(function(t,i){
+        var d = new Date(t.timestamp).toLocaleString('en-PK',{timeZone:'Asia/Karachi'})
+        ctxLines.push((i+1)+'. '+d+' | '+parseFloat(t.amount).toFixed(2)+' VEC → '+
+          (t.to||'?').slice(0,12)+'... | fee: '+parseFloat(t.feeVec||0).toFixed(4)+' VEC')
       })
     } else {
-      ctxLines.push('Transaction History: No transactions yet')
+      ctxLines.push('No transactions yet')
+    }
+  } else {
+    ctxLines.push('No wallet connected')
+  }
+
+  var systemPrompt = `You are Vela, the official AI assistant for VelaCore (VEC) — a gasless payment DApp on BNB Smart Chain Testnet.
+
+LANGUAGE RULE (very important):
+- Default language: English
+- If user writes in Roman Urdu → reply in Roman Urdu
+- If user writes in Urdu script → reply in Urdu script
+- If user writes in Sindhi → reply in Sindhi
+- Match user's language exactly. Never switch to Hindi.
+
+SCOPE: Only answer questions about VelaCore ecosystem. If asked anything unrelated, say:
+"I can only help with VelaCore-related questions! Ask me anything about VEC, gasless payments, or your wallet. 🌟"
+
+VELACORE KNOWLEDGE:
+- VEC Token: ERC-20 on BNB Testnet | Contract: 0x5172335bF34D96B541581B1f656d8fC2D94D3be8 | 18 decimals
+- Gasless: Users sign EIP-712 permit → relay submits tx → pays gas | 0.5% platform fee
+- Paymaster: 0x2e2B3D1979fFc20Df732b205391cDDfDeb9CE890
+- Features: Send VEC · QR Code · Share & Pay links · Currency Converter (PKR/USD/EUR/GBP/AED) · Transaction History · CSV Export · Universal Wallet Connect
+- Supported wallets: MetaMask, Trust Wallet, Coinbase Wallet, any EIP-6963 wallet
+- Explorer: https://testnet.bscscan.com
+
+HOW TO USE:
+1. Click "Connect Wallet" → choose wallet
+2. Auto-switches to BNB Testnet (Chain ID 97)
+3. Enter recipient address + VEC amount
+4. Click Pay → sign permit in wallet (no BNB needed)
+5. Done — tx confirmed on-chain gaslessly
+
+COMMON ISSUES:
+- Relay Offline → wait 10s, refresh
+- Signature expired → click Pay again
+- Wrong network → switch to BNB Testnet (Chain ID 97)
+- No wallet detected → install MetaMask or use mobile deep link
+- Mobile → tap wallet button to open app, approve, return to browser
+
+STYLE: Be concise, friendly, helpful. Use short paragraphs. No excessive emojis.
+
+USER WALLET CONTEXT:
+${ctxLines.join('\n')}`
+
+  var requestBody = JSON.stringify({
+    model:      'claude-haiku-4-5-20251001',
+    max_tokens: 800,
+    system:     systemPrompt,
+    messages:   messages,
+  })
+
+  var options = {
+    hostname: 'api.anthropic.com',
+    port:     443,
+    path:     '/v1/messages',
+    method:   'POST',
+    headers: {
+      'Content-Type':      'application/json',
+      'Content-Length':    Buffer.byteLength(requestBody),
+      'x-api-key':         apiKey,
+      'anthropic-version': '2023-06-01',
     }
   }
 
-  var walletCtxString = ctxLines.length > 0
-    ? '\n\n=== CURRENT USER WALLET CONTEXT ===\n' + ctxLines.join('\n') + '\n==================================='
-    : '\n\n=== WALLET CONTEXT ===\nNo wallet connected.'
-
-  var systemPrompt = `You are Vela — the official AI assistant for the VelaCore (VEC) ecosystem. You are a friendly, knowledgeable, and helpful personal assistant embedded directly inside the VelaCore DApp.
-
-=== YOUR IDENTITY ===
-- Name: Vela (VelaCore AI Assistant)
-- You speak in a friendly, helpful, concise tone
-- You support both English and Urdu/Hinglish (respond in whatever language the user uses)
-- You use short paragraphs, emojis when appropriate, and clear formatting
-
-=== YOUR KNOWLEDGE SCOPE ===
-You ONLY answer questions related to:
-1. VelaCore (VEC) ecosystem — token, features, gasless payments, smart contracts
-2. The user's own wallet — balance, transactions, history, fees paid
-3. How to use the VelaCore DApp — sending VEC, connecting wallets, QR codes, share links
-4. BNB Smart Chain Testnet — network info, how gasless works via permit/EIP-712
-5. Crypto basics — only when directly relevant to using VelaCore
-6. Troubleshooting — connection issues, transaction failures, wallet problems on this DApp
-
-If asked about anything OUTSIDE VelaCore ecosystem (e.g. Bitcoin price, other DApps, stock market, general questions), politely say:
-"Main sirf VelaCore ecosystem ke baare mein help kar sakta hun! 🌟 Koi aur sawaal ho VelaCore ke baare mein?"
-
-=== VELACORE ECOSYSTEM KNOWLEDGE ===
-**VEC Token:**
-- Full name: VelaCore Token (VEC)
-- Network: BNB Smart Chain Testnet (Chain ID: 97)
-- Contract: 0x5172335bF34D96B541581B1f656d8fC2D94D3be8
-- Decimals: 18
-- Features: EIP-712 permit support (gasless approvals), ERC-20 standard
-
-**Gasless Payments:**
-- Users can send VEC WITHOUT holding BNB for gas
-- Uses EIP-712 permit signature + relay server (Paymaster)
-- Paymaster address: 0x2e2B3D1979fFc20Df732b205391cDDfDeb9CE890
-- Fee: 0.5% platform fee (covers gas costs)
-- How it works: User signs a permit → Relay submits tx on-chain → pays gas from relay wallet
-
-**DApp Features:**
-- Send VEC gaslessly to any address
-- QR Code — generate your wallet QR, scan others
-- Share & Pay — create payment links via WhatsApp, Telegram
-- Currency Converter — convert PKR/USD/EUR/GBP/AED to VEC live rates
-- Transaction History — full history with BscScan links
-- CSV Export — download your transaction history
-- Universal Wallet Connect — MetaMask, Trust Wallet, Coinbase, any EIP-6963 wallet
-
-**How to use:**
-1. Connect Wallet — click "Connect Wallet", choose your wallet app
-2. Switch to BNB Testnet in your wallet (DApp will prompt automatically)
-3. Enter recipient address and VEC amount
-4. Click Pay — sign the permit in your wallet (no BNB needed!)
-5. Done — transaction confirmed on-chain
-
-**Common Issues & Solutions:**
-- "Relay Offline" → Backend server starting up, wait 10 seconds and refresh
-- "Signature expired" → Click Pay again, sign within 60 minutes
-- "Insufficient balance" → You need VEC tokens — get testnet VEC from the team
-- "Wrong network" → Switch to BNB Testnet (Chain ID 97) in your wallet
-- "Cannot reach relay" → Check internet, server may be restarting
-- MetaMask not connecting → Refresh page, unlock MetaMask first
-- Mobile wallet → Use deep link button to open your wallet app${walletCtxString}
-
-=== RESPONSE STYLE ===
-- Keep responses concise and helpful
-- Use bullet points for lists, but keep it readable
-- For transaction queries, use the wallet context above to give EXACT numbers
-- Always be encouraging and positive about VelaCore
-- End with a helpful follow-up offer when relevant`
-
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type':      'application/json',
-        'x-api-key':         process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model:      'claude-haiku-4-5-20251001',
-        max_tokens: 1024,
-        system:     systemPrompt,
-        messages:   messages,
-      }),
-    })
+    var result = await httpsPost(options, requestBody)
 
-    if (!response.ok) {
-      var errText = await response.text()
-      console.error('[ai] Anthropic API error:', errText)
-      return res.status(500).json({ error: 'AI service error. Please try again.' })
+    if (result.status !== 200) {
+      console.error('[ai] Anthropic error:', result.status, JSON.stringify(result.body))
+      var errMsg = (result.body && result.body.error && result.body.error.message) || 'AI API error ' + result.status
+      return res.status(500).json({ success: false, error: errMsg })
     }
 
-    var data = await response.json()
-    var reply = data.content && data.content[0] && data.content[0].text
-    if (!reply) return res.status(500).json({ error: 'Empty response from AI.' })
+    var reply = result.body.content && result.body.content[0] && result.body.content[0].text
+    if (!reply) return res.status(500).json({ success: false, error: 'Empty AI response' })
 
-    return res.json({ success: true, reply })
+    return res.json({ success: true, reply: reply })
 
-  } catch (err) {
-    console.error('[ai] ERROR:', err.message)
-    return res.status(500).json({ error: 'AI unavailable: ' + err.message })
+  } catch(err) {
+    console.error('[ai] Network error:', err.message)
+    return res.status(500).json({ success: false, error: 'Network error: ' + err.message })
   }
 }

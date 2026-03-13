@@ -7,6 +7,7 @@ import TransactionHistory from './TransactionHistory.jsx'
 import QRModal from './QRModal.jsx'
 import ShareModal from './ShareModal.jsx'
 import CurrencyConverter from './CurrencyConverter.jsx'
+import VelaCoreAI from './VelaCoreAI.jsx'
 
 // ─── Color System ───────────────────────────────────────────────────────────────
 // BG:       #0a0e1a   (deep navy)
@@ -618,7 +619,8 @@ export default function App() {
           80%  { opacity:1; }
           100% { transform: translateY(105vh)  translateX(var(--drift)) rotate(var(--rot)); opacity:0; }
         }
-        @keyframes receiptIn    { from{opacity:0;transform:translateY(18px) scale(0.97)} to{opacity:1;transform:translateY(0) scale(1)} }
+        @keyframes spin { to{transform:rotate(360deg)} }
+  @keyframes receiptIn    { from{opacity:0;transform:translateY(18px) scale(0.97)} to{opacity:1;transform:translateY(0) scale(1)} }
         .fade-up { animation: fadeUp 0.38s ease-out; }
         * { box-sizing:border-box; }
         input[type=number]::-webkit-inner-spin-button,
@@ -658,6 +660,13 @@ export default function App() {
           onMobileDeepLink={handleMobileDeepLink}
         />
       )}
+
+      {/* Vela AI — floating assistant */}
+      <VelaCoreAI
+        wallet={wallet}
+        balance={balance}
+        txHistory={txHistory}
+      />
       {showQR && wallet && (
         <QRModal address={wallet.address} balance={balance} onClose={function(){ setShowQR(false) }}
           onAddressScanned={function(a){ setToAddr(a); setShowQR(false); addToast('Address Scanned!', a.slice(0,10)+'...'+a.slice(-6)+' filled in.','success') }} />

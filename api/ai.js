@@ -1,3 +1,6 @@
+// api/ai.js — VelaCore AI Assistant (Gemini API)
+// Vercel env var needed: GEMINI_API_KEY
+// Get free API key: https://aistudio.google.com/app/apikey
 const https = require('https')
 
 function httpsPost(options, body) {
@@ -5,7 +8,7 @@ function httpsPost(options, body) {
     var req = https.request(options, function(res) {
       var data = ''
       res.on('data', function(chunk) { data += chunk })
-      res.on('end',  function() {
+      res.on('end', function() {
         try { resolve({ status: res.statusCode, body: JSON.parse(data) }) }
         catch(e) { resolve({ status: res.statusCode, body: data }) }
       })
@@ -23,110 +26,143 @@ module.exports = async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end()
   if (req.method !== 'POST')   return res.status(405).json({ error: 'Method not allowed' })
 
-  var apiKey = process.env.ANTHROPIC_API_KEY
+  var apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) return res.status(500).json({
     success: false,
-    error: 'ANTHROPIC_API_KEY not set in Vercel → Settings → Environment Variables'
+    error: 'GEMINI_API_KEY not set. Go to Vercel → Settings → Environment Variables and add it. Get free key from https://aistudio.google.com/app/apikey'
   })
 
-  var body = req.body || {}
+  var body     = req.body || {}
   var messages = body.messages
-  var wc = body.walletContext || null
+  var wc       = body.walletContext || null
 
   if (!messages || !Array.isArray(messages) || messages.length === 0)
     return res.status(400).json({ success: false, error: 'messages array required' })
 
+  // ── Build wallet context ────────────────────────────────────────────────────
   var ctxLines = []
   if (wc) {
-    if (wc.address) ctxLines.push('Wallet: ' + wc.address)
+    if (wc.address) ctxLines.push('Wallet Address: ' + wc.address)
     if (wc.balance) ctxLines.push('VEC Balance: ' + wc.balance + ' VEC')
-    ctxLines.push('Network: BNB Smart Chain Testnet')
+    ctxLines.push('Network: BNB Smart Chain Testnet (Chain ID: 97)')
 
     var history = wc.txHistory || []
     if (history.length > 0) {
-      var now      = Date.now()
-      var DAY      = 86400000
-      var todayTx  = history.filter(function(t){ return now - t.timestamp < DAY })
-      var weekTx   = history.filter(function(t){ return now - t.timestamp < DAY*7 })
-      var monthTx  = history.filter(function(t){ return now - t.timestamp < DAY*30 })
-      var sum      = function(arr, k){ return arr.reduce(function(s,t){ return s+parseFloat(t[k]||0) },0).toFixed(2) }
+      var now  = Date.now()
+      var DAY  = 86400000
+      var sum  = function(arr, k) { return arr.reduce(function(s,t){ return s + parseFloat(t[k]||0) }, 0).toFixed(2) }
+      var todayTx = history.filter(function(t){ return now - t.timestamp < DAY })
+      var weekTx  = history.filter(function(t){ return now - t.timestamp < DAY*7 })
+      var monthTx = history.filter(function(t){ return now - t.timestamp < DAY*30 })
 
-      ctxLines.push('--- Stats ---')
-      ctxLines.push('Today: '      + todayTx.length + ' txs, ' + sum(todayTx,'amount')  + ' VEC sent')
-      ctxLines.push('This week: '  + weekTx.length  + ' txs, ' + sum(weekTx,'amount')   + ' VEC sent')
-      ctxLines.push('This month: ' + monthTx.length + ' txs, ' + sum(monthTx,'amount')  + ' VEC sent')
-      ctxLines.push('All-time: '   + history.length + ' txs, ' + sum(history,'amount')  + ' VEC sent')
-      ctxLines.push('Total fees: ' + sum(history,'feeVec') + ' VEC')
+      ctxLines.push('--- Transaction Summary ---')
+      ctxLines.push('Today:      ' + todayTx.length + ' txs | ' + sum(todayTx,'amount') + ' VEC sent')
+      ctxLines.push('This week:  ' + weekTx.length  + ' txs | ' + sum(weekTx,'amount')  + ' VEC sent')
+      ctxLines.push('This month: ' + monthTx.length + ' txs | ' + sum(monthTx,'amount') + ' VEC sent')
+      ctxLines.push('All-time:   ' + history.length + ' txs | ' + sum(history,'amount') + ' VEC sent | fees: ' + sum(history,'feeVec') + ' VEC')
 
       ctxLines.push('--- Last 5 Transactions ---')
-      history.slice(0,5).forEach(function(t,i){
-        var d = new Date(t.timestamp).toLocaleString('en-PK',{timeZone:'Asia/Karachi'})
-        ctxLines.push((i+1)+'. '+d+' | '+parseFloat(t.amount).toFixed(2)+' VEC → '+
-          (t.to||'?').slice(0,12)+'... | fee: '+parseFloat(t.feeVec||0).toFixed(4)+' VEC')
+      history.slice(0, 5).forEach(function(t, i) {
+        var d = new Date(t.timestamp).toLocaleString('en-PK', { timeZone: 'Asia/Karachi' })
+        ctxLines.push(
+          (i+1) + '. ' + d +
+          ' | Sent: ' + parseFloat(t.amount||0).toFixed(2) + ' VEC' +
+          ' → ' + (t.to||'?').slice(0,12) + '...' +
+          ' | Fee: ' + parseFloat(t.feeVec||0).toFixed(4) + ' VEC'
+        )
       })
     } else {
-      ctxLines.push('No transactions yet')
+      ctxLines.push('No transactions yet.')
     }
   } else {
-    ctxLines.push('No wallet connected')
+    ctxLines.push('No wallet connected.')
   }
 
-  var systemPrompt = `You are Vela, the official AI assistant for VelaCore (VEC) — a gasless payment DApp on BNB Smart Chain Testnet.
+  // ── System instruction ─────────────────────────────────────────────────────
+  var systemInstruction = `You are Vela, the official AI assistant for VelaCore (VEC) — a gasless payment DApp on BNB Smart Chain Testnet.
 
-LANGUAGE RULE (very important):
-- Default language: English
-- If user writes in Roman Urdu → reply in Roman Urdu
-- If user writes in Urdu script → reply in Urdu script
-- If user writes in Sindhi → reply in Sindhi
-- Match user's language exactly. Never switch to Hindi.
+LANGUAGE RULE (strictly follow):
+- Default: English
+- If user writes in Roman Urdu → reply in Roman Urdu only
+- If user writes in Urdu script → reply in Urdu script only
+- If user writes in Sindhi → reply in Sindhi only
+- Never use Hindi. Never mix languages unless user does.
 
-SCOPE: Only answer questions about VelaCore ecosystem. If asked anything unrelated, say:
-"I can only help with VelaCore-related questions! Ask me anything about VEC, gasless payments, or your wallet. 🌟"
+SCOPE: Only answer VelaCore-related questions. If asked anything else, say:
+"I can only help with VelaCore-related questions! Ask me anything about VEC, gasless payments, or your wallet."
 
 VELACORE KNOWLEDGE:
-- VEC Token: ERC-20 on BNB Testnet | Contract: 0x5172335bF34D96B541581B1f656d8fC2D94D3be8 | 18 decimals
-- Gasless: Users sign EIP-712 permit → relay submits tx → pays gas | 0.5% platform fee
+- VEC Token: ERC-20 | BNB Testnet | Contract: 0x5172335bF34D96B541581B1f656d8fC2D94D3be8 | 18 decimals
+- Gasless payments: EIP-712 permit signature + relay server pays gas | 0.5% platform fee
 - Paymaster: 0x2e2B3D1979fFc20Df732b205391cDDfDeb9CE890
-- Features: Send VEC · QR Code · Share & Pay links · Currency Converter (PKR/USD/EUR/GBP/AED) · Transaction History · CSV Export · Universal Wallet Connect
-- Supported wallets: MetaMask, Trust Wallet, Coinbase Wallet, any EIP-6963 wallet
+- Features: Send VEC · QR Code · Share & Pay links · Currency Converter (PKR/USD/EUR/GBP/AED) · Tx History · CSV Export · Universal Wallet Connect
+- Wallets: MetaMask, Trust Wallet, Coinbase, any EIP-6963 wallet, mobile deep links
 - Explorer: https://testnet.bscscan.com
 
 HOW TO USE:
-1. Click "Connect Wallet" → choose wallet
+1. Click "Connect Wallet" → pick your wallet
 2. Auto-switches to BNB Testnet (Chain ID 97)
-3. Enter recipient address + VEC amount
-4. Click Pay → sign permit in wallet (no BNB needed)
-5. Done — tx confirmed on-chain gaslessly
+3. Enter recipient address + amount
+4. Click Pay → sign permit (no BNB needed)
+5. Confirmed on-chain — gaslessly
 
 COMMON ISSUES:
-- Relay Offline → wait 10s, refresh
+- Relay Offline → wait 10s, refresh page
 - Signature expired → click Pay again
-- Wrong network → switch to BNB Testnet (Chain ID 97)
-- No wallet detected → install MetaMask or use mobile deep link
-- Mobile → tap wallet button to open app, approve, return to browser
+- Wrong network → switch to BNB Testnet in wallet
+- No wallet detected → install MetaMask or use mobile deep link button
+- Insufficient balance → need VEC tokens on BNB Testnet
 
-STYLE: Be concise, friendly, helpful. Use short paragraphs. No excessive emojis.
+STYLE: Concise, friendly, helpful. Short paragraphs. No excessive emojis.
 
 USER WALLET CONTEXT:
 ${ctxLines.join('\n')}`
 
-  var requestBody = JSON.stringify({
-    model:      'claude-haiku-4-5-20251001',
-    max_tokens: 800,
-    system:     systemPrompt,
-    messages:   messages,
+  // ── Convert messages to Gemini format ──────────────────────────────────────
+  // Gemini uses 'user' and 'model' roles (not 'assistant')
+  // System instruction is separate, not part of contents
+  var contents = messages.map(function(m) {
+    return {
+      role:  m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content || m.text || '' }]
+    }
   })
 
+  // Ensure conversation starts with 'user' (Gemini requirement)
+  if (contents.length > 0 && contents[0].role !== 'user') {
+    contents = contents.slice(1)
+  }
+
+  var requestBody = JSON.stringify({
+    system_instruction: {
+      parts: [{ text: systemInstruction }]
+    },
+    contents: contents,
+    generationConfig: {
+      maxOutputTokens: 800,
+      temperature:     0.7,
+      topP:            0.9,
+    },
+    safetySettings: [
+      { category: 'HARM_CATEGORY_HARASSMENT',        threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_HATE_SPEECH',       threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+    ]
+  })
+
+  // Using gemini-2.0-flash — fast, free tier available
+  var model = 'gemini-2.0-flash'
+  var path  = '/v1beta/models/' + model + ':generateContent?key=' + apiKey
+
   var options = {
-    hostname: 'api.anthropic.com',
+    hostname: 'generativelanguage.googleapis.com',
     port:     443,
-    path:     '/v1/messages',
+    path:     path,
     method:   'POST',
     headers: {
-      'Content-Type':      'application/json',
-      'Content-Length':    Buffer.byteLength(requestBody),
-      'x-api-key':         apiKey,
-      'anthropic-version': '2023-06-01',
+      'Content-Type':   'application/json',
+      'Content-Length': Buffer.byteLength(requestBody),
     }
   }
 
@@ -134,13 +170,22 @@ ${ctxLines.join('\n')}`
     var result = await httpsPost(options, requestBody)
 
     if (result.status !== 200) {
-      console.error('[ai] Anthropic error:', result.status, JSON.stringify(result.body))
-      var errMsg = (result.body && result.body.error && result.body.error.message) || 'AI API error ' + result.status
+      console.error('[ai] Gemini error:', result.status, JSON.stringify(result.body).slice(0, 300))
+      var errMsg = 'AI API error (HTTP ' + result.status + ')'
+      if (result.body && result.body.error) errMsg = result.body.error.message || errMsg
       return res.status(500).json({ success: false, error: errMsg })
     }
 
-    var reply = result.body.content && result.body.content[0] && result.body.content[0].text
-    if (!reply) return res.status(500).json({ success: false, error: 'Empty AI response' })
+    // Extract text from Gemini response
+    var candidate = result.body.candidates && result.body.candidates[0]
+    var reply     = candidate && candidate.content && candidate.content.parts && candidate.content.parts[0] && candidate.content.parts[0].text
+
+    if (!reply) {
+      // Check for blocked content
+      var blockReason = candidate && candidate.finishReason
+      if (blockReason === 'SAFETY') return res.status(200).json({ success: true, reply: "I couldn't generate a response for that. Please try rephrasing your question." })
+      return res.status(500).json({ success: false, error: 'Empty response from Gemini.' })
+    }
 
     return res.json({ success: true, reply: reply })
 

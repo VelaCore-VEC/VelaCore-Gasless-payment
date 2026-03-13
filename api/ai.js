@@ -152,7 +152,7 @@ ${ctxLines.join('\n')}`
   })
 
   // Using gemini-2.0-flash — fast, free tier available
-  var model = 'gemini-1.5-flash'
+  var model = 'gemini-1.5-flash-latest'
   var path  = '/v1beta/models/' + model + ':generateContent?key=' + apiKey
 
   var options = {

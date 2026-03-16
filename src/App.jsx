@@ -452,41 +452,30 @@ export default function App() {
     ping(); var iv=setInterval(ping,20000); return function(){ clearInterval(iv) }
   },[])
 
-  // ── Real-time Transfer event listener ────────────────────────────────────
-  // Listens for on-chain Transfer events to/from user wallet — updates balance instantly
+  // ── Real-time balance polling ─────────────────────────────────────────────
+  // Polls balance every 8s — works reliably on BNB Testnet RPC
   useEffect(function() {
     if (!wallet) return
-    var provider = wallet.provider
-    var filter = {
-      address: VEC_TOKEN_ADDRESS,
-      topics: [
-        ethers.id('Transfer(address,address,uint256)'),
-      ]
-    }
-    var debounce = null
-    function onTransfer(log) {
-      // Decode to check if it involves our wallet
+    var lastBalance = null
+    var iv = setInterval(async function() {
       try {
-        var from = '0x' + log.topics[1].slice(26)
-        var to   = '0x' + log.topics[2].slice(26)
-        var addr = wallet.address.toLowerCase()
-        if (from.toLowerCase() !== addr && to.toLowerCase() !== addr) return
-        // Debounce — wait 1.5s then reload (tx may not be confirmed yet)
-        clearTimeout(debounce)
-        debounce = setTimeout(function() {
+        var tok = new ethers.Contract(VEC_TOKEN_ADDRESS, VEC_ABI, wallet.provider)
+        var raw = await tok.balanceOf(wallet.address)
+        var fmt = ethers.formatUnits(raw, 18)
+        var current = parseFloat(fmt).toFixed(4)
+        if (lastBalance !== null && current !== lastBalance) {
+          var prev = parseFloat(lastBalance)
+          var curr = parseFloat(current)
           loadBalance(wallet)
           loadHistory(wallet.address)
-          if (to.toLowerCase() === addr && from.toLowerCase() !== addr) {
-            addToast('VEC Received! 💰', 'Your balance has been updated.', 'success')
+          if (curr > prev) {
+            addToast('VEC Received! 💰', (curr - prev).toFixed(4) + ' VEC added to your wallet.', 'success')
           }
-        }, 1500)
+        }
+        lastBalance = current
       } catch(e) {}
-    }
-    provider.on(filter, onTransfer)
-    return function() {
-      provider.off(filter, onTransfer)
-      clearTimeout(debounce)
-    }
+    }, 8000)
+    return function() { clearInterval(iv) }
   }, [wallet, loadBalance, loadHistory])
 
   var loadBalance = useCallback(async function(w){
@@ -1001,25 +990,16 @@ export default function App() {
                 </div>
 
                 {/* Fee rows */}
-                <div style={{ borderRadius:'12px', border:'1px solid rgba(255,255,255,0.08)', overflow:'hidden' }}>
+                <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
                   {[
-                    { label:'You Send',                     value: parseFloat(amount).toFixed(4)+' VEC',  color:'#e5e7eb', note: null },
-                    { label:'Platform Fee ('+(fee.isSpecial?'0.3%':'0.5%')+')',  value:'− '+fee.platformFee+' VEC',           color:'#fbbf24', note: fee.isSpecial ? 'Special tier (≥10k VEC)' : 'Regular tier' },
-                    { label:'  ↳ Gas Tank (40%)',           value: fee.gasTankAmt+' VEC',                color:'#94a3b8', note: 'Funds relay gas' },
-                    { label:'  ↳ Staking Rewards (40%)',    value: fee.stakingAmt+' VEC',                color:'#94a3b8', note: 'Stakers earn this' },
-                    { label:'  ↳ Treasury (20%)',           value: fee.treasuryAmt+' VEC',               color:'#94a3b8', note: 'VelaCore team' },
-                    { label:'Native Token Fee (0.5%)',      value:'− '+fee.nativeFee+' VEC',             color:'#f87171', note: null },
-                    { label:'  ↳ Burned (0.3%)',            value:'🔥 '+fee.burnAmt+' VEC',              color:'#f87171', note: 'Permanently removed' },
-                    { label:'  ↳ Liquidity Pool (0.2%)',    value: fee.lpAmt+' VEC',                     color:'#94a3b8', note: 'Adds to LP' },
+                    { label:'You Send',              value: parseFloat(amount).toFixed(4)+' VEC', color:'#e5e7eb' },
+                    { label:'Platform Fee '+(fee.isSpecial?'0.3%':'0.5%'), value:'− '+fee.platformFee+' VEC', color:'#fbbf24' },
+                    { label:'Native Token Fee 0.5%', value:'− '+fee.nativeFee+' VEC',            color:'#f87171' },
                   ].map(function(r, i) {
-                    var isSubRow = r.label.startsWith('  ↳')
                     return (
-                      <div key={i} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding: isSubRow ? '5px 14px' : '9px 14px', background: isSubRow ? 'rgba(0,0,0,0.15)' : 'transparent', borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
-                        <div>
-                          <span style={{ fontSize: isSubRow ? '12px' : '13px', color: isSubRow ? '#6b7280' : '#9ca3af', fontWeight: isSubRow ? 400 : 600 }}>{r.label}</span>
-                          {r.note && <span style={{ fontSize:'11px', color:'#4b5563', marginLeft:'6px' }}>({r.note})</span>}
-                        </div>
-                        <span style={{ fontSize: isSubRow ? '12px' : '13px', fontWeight:700, color:r.color, fontFamily:'monospace' }}>{r.value}</span>
+                      <div key={i} style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                        <span style={{ fontSize:'13px', color:'#9ca3af', fontWeight:500 }}>{r.label}</span>
+                        <span style={{ fontSize:'13px', fontWeight:700, color:r.color, fontFamily:'monospace' }}>{r.value}</span>
                       </div>
                     )
                   })}
@@ -1103,11 +1083,11 @@ export default function App() {
                   <p style={{ fontSize:'11px', fontWeight:800, color:'#9ca3af', textTransform:'uppercase', letterSpacing:'0.12em', margin:'0 0 12px' }}>Fee Breakdown</p>
                   <div style={{ borderRadius:'14px', border:'1px solid rgba(255,255,255,0.09)', overflow:'hidden' }}>
                     {[
-                      { label:'Gross Amount Sent',             value: result.amount.toFixed(6)+' VEC',                    note: null,                             color:'#e5e7eb', bg:'rgba(255,255,255,0.03)' },
-                      { label:'Platform Fee ('+(result.isSpecial?'0.3% Special':'0.5% Regular')+')', value:'− '+parseFloat(result.feeVec).toFixed(6)+' VEC', note: result.isSpecial?'≥10k VEC holder':'Standard rate', color:'#fbbf24', bg:'rgba(251,191,36,0.04)' },
-                      { label:'Native Token Fee (0.5%)',       value:'− '+parseFloat(result.nativeFee||0).toFixed(6)+' VEC', note:'0.3% burned + 0.2% LP',       color:'#f87171', bg:'rgba(248,113,113,0.04)' },
-                      { label:'BNB Gas Fee',                   value:'$0.00',                                              note:'Sponsored by VelaCore',          color:'#4ade80', bg:'rgba(74,222,128,0.04)'  },
-                      { label:'Recipient Receives',            value: parseFloat(result.net).toFixed(6)+' VEC',            note:'Net amount received',            color:'#34d399', bg:'rgba(52,211,153,0.05)',  bold:true },
+                      { label:'Amount Sent',          value: result.amount.toFixed(4)+' VEC',                      note:null,                   color:'#e5e7eb', bg:'rgba(255,255,255,0.03)' },
+                      { label:'Platform Fee '+(result.isSpecial?'0.3%':'0.5%'), value:'− '+parseFloat(result.feeVec).toFixed(4)+' VEC', note: result.isSpecial?'Special tier':'',  color:'#fbbf24', bg:'rgba(251,191,36,0.04)' },
+                      { label:'Native Token Fee 0.5%',value:'− '+parseFloat(result.nativeFee||0).toFixed(4)+' VEC', note:null,                   color:'#f87171', bg:'rgba(248,113,113,0.04)' },
+                      { label:'BNB Gas Fee',           value:'$0.00',                                               note:'Sponsored',            color:'#4ade80', bg:'rgba(74,222,128,0.04)'  },
+                      { label:'Recipient Receives',   value: parseFloat(result.net).toFixed(4)+' VEC',              note:null,                   color:'#34d399', bg:'rgba(52,211,153,0.05)',  bold:true },
                     ].map(function(row, i, arr) {
                       return (
                         <div key={row.label} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'13px 16px', background:row.bg, borderBottom: i < arr.length-1 ? '1px solid rgba(255,255,255,0.07)' : 'none', gap:'12px', flexWrap:'wrap' }}>

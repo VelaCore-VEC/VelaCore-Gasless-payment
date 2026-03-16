@@ -1,15 +1,5 @@
-// api/relay.js — VelaCore Gasless Relay (Vercel Serverless Function)
-// Place in your frontend repo: /api/relay.js
-// Vercel auto-deploys this as a serverless function
-//
-// Required Vercel env vars (Settings → Environment Variables):
-//   RELAYER_PRIVATE_KEY = 0x...your relayer wallet private key
-//   VEC_TOKEN_ADDRESS   = 0x5172335bF34D96B541581B1f656d8fC2D94D3be8
-//   RPC_URL             = https://data-seed-prebsc-1-s1.binance.org:8545/
-
 const { ethers } = require('ethers')
 
-// Global in-memory store — survives warm requests, resets on cold start
 if (!global._vecHistory) global._vecHistory = {}
 
 const RPC_URL           = process.env.RPC_URL || 'https://data-seed-prebsc-1-s1.binance.org:8545/'

@@ -398,6 +398,31 @@ export default function App() {
     }
   }, [])
 
+  // ── Auto-reconnect on page refresh ────────────────────────────────────────
+  useEffect(function() {
+    var saved = localStorage.getItem('velacore_wallet')
+    if (!saved) return
+    if (!window.ethereum) return
+    var info = null
+    try { info = JSON.parse(saved) } catch(e) { return }
+    if (!info || !info.address) return
+    // Silently reconnect — no popup, just re-read existing session
+    var prov = new ethers.BrowserProvider(window.ethereum)
+    prov.send('eth_accounts', []).then(function(accounts) {
+      if (!accounts || !accounts.length) return
+      if (accounts[0].toLowerCase() !== info.address.toLowerCase()) return
+      return prov.getSigner().then(function(signer) {
+        return signer.getAddress().then(function(address) {
+          var w = { address, signer, provider: prov, rawProvider: window.ethereum }
+          setWallet(w); setStatus('connected')
+          loadBalance(w); loadHistory(address)
+        })
+      })
+    }).catch(function() {
+      localStorage.removeItem('velacore_wallet')
+    })
+  }, [])
+
   var stats = useMemo(function() {
     if (!txHistory.length) return { gas:'0.000', count:0, fee:'0.000', vec:'0.00' }
     return {
@@ -415,11 +440,10 @@ export default function App() {
   }
   function removeToast(id){ setToasts(function(p){ return p.filter(function(t){ return t.id!==id }) }) }
 
-  useEffect(function(){ setFee(parseFloat(amount)>0?calcFee(parseFloat(amount)):null) },[amount])
+  useEffect(function(){ setFee(parseFloat(amount)>0?calcFee(parseFloat(amount), parseFloat(rawBalance||0)):null) },[amount, rawBalance])
 
   useEffect(function(){
     function ping(){
-      // GET /api/relay returns {healthy:true} — simple status check
       fetch(RELAY_SERVER_URL, { method:'GET' })
         .then(function(r){ return r.ok ? r.json() : Promise.reject() })
         .then(function(d){ setServerOnline(d.healthy !== false) })
@@ -427,6 +451,43 @@ export default function App() {
     }
     ping(); var iv=setInterval(ping,20000); return function(){ clearInterval(iv) }
   },[])
+
+  // ── Real-time Transfer event listener ────────────────────────────────────
+  // Listens for on-chain Transfer events to/from user wallet — updates balance instantly
+  useEffect(function() {
+    if (!wallet) return
+    var provider = wallet.provider
+    var filter = {
+      address: VEC_TOKEN_ADDRESS,
+      topics: [
+        ethers.id('Transfer(address,address,uint256)'),
+      ]
+    }
+    var debounce = null
+    function onTransfer(log) {
+      // Decode to check if it involves our wallet
+      try {
+        var from = '0x' + log.topics[1].slice(26)
+        var to   = '0x' + log.topics[2].slice(26)
+        var addr = wallet.address.toLowerCase()
+        if (from.toLowerCase() !== addr && to.toLowerCase() !== addr) return
+        // Debounce — wait 1.5s then reload (tx may not be confirmed yet)
+        clearTimeout(debounce)
+        debounce = setTimeout(function() {
+          loadBalance(wallet)
+          loadHistory(wallet.address)
+          if (to.toLowerCase() === addr && from.toLowerCase() !== addr) {
+            addToast('VEC Received! 💰', 'Your balance has been updated.', 'success')
+          }
+        }, 1500)
+      } catch(e) {}
+    }
+    provider.on(filter, onTransfer)
+    return function() {
+      provider.off(filter, onTransfer)
+      clearTimeout(debounce)
+    }
+  }, [wallet, loadBalance, loadHistory])
 
   var loadBalance = useCallback(async function(w){
     if(!w) return
@@ -487,6 +548,7 @@ export default function App() {
       var address = await signer.getAddress()
       var w = { address, signer, provider, rawProvider }
       setWallet(w); setStatus('connected'); setMobileMenu(false)
+      localStorage.setItem('velacore_wallet', JSON.stringify({ address, walletName: walletName||'Wallet' }))
       addToast('Wallet Connected! 🎉', (walletName||'Wallet') + ' — ' + shortAddr(address), 'success')
       await loadBalance(w)
       await loadHistory(address)
@@ -521,10 +583,10 @@ export default function App() {
   }, [])
 
   var disconnect = useCallback(function() {
-    // Try to revoke permissions (supported by some wallets)
     if (wallet && wallet.rawProvider && wallet.rawProvider.request) {
       wallet.rawProvider.request({ method:'wallet_revokePermissions', params:[{ eth_accounts:{} }] }).catch(function(){})
     }
+    localStorage.removeItem('velacore_wallet')
     setWallet(null); setBalance('0.00'); setRawBalance('0'); setStatus('idle')
     setTxHistory([]); setStep(0); setFee(null); setResult(null)
     setToAddr(''); setAmount(''); setPrefillNote(''); setMobileMenu(false)
@@ -577,7 +639,11 @@ export default function App() {
         throw new Error(errMsg)
       }
       setStep(3); setStatus('success')
-      setResult({hash:data.txHash,amount:parseFloat(amount),net:data.amountSent,feeVec:data.feeCollected})
+      var feeCalc = fee || calcFee(parseFloat(amount), parseFloat(rawBalance||0))
+      setResult({hash:data.txHash,amount:parseFloat(amount),net:data.amountSent,feeVec:data.feeCollected,
+        nativeFee: feeCalc ? parseFloat(feeCalc.nativeFee) : 0,
+        isSpecial: feeCalc ? feeCalc.isSpecial : false,
+      })
       setShowConfetti(true)
       setTimeout(function(){ setShowConfetti(false) }, 4500)
       addToast('Transfer Successful! 🎉', parseFloat(amount)+' VEC sent — $0.00 gas paid.','success')
@@ -922,47 +988,59 @@ export default function App() {
 
             {/* Fee preview */}
             {fee && (
-              <div style={{ borderRadius:'16px', border:'1px solid rgba(99,102,241,0.2)', background:'rgba(99,102,241,0.07)', padding:'20px', display:'flex', flexDirection:'column', gap:'14px' }}>
-                <p style={{ fontSize:'11px', fontWeight:800, textTransform:'uppercase', letterSpacing:'0.1em', color:'#9ca3af', margin:0 }}>Transaction Preview</p>
+              <div style={{ borderRadius:'16px', border:'1px solid rgba(99,102,241,0.2)', background:'rgba(99,102,241,0.07)', padding:'18px', display:'flex', flexDirection:'column', gap:'12px' }}>
 
-                {/* Rows */}
-                <div style={{ display:'flex', flexDirection:'column', gap:'10px' }}>
+                {/* Header */}
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                  <p style={{ fontSize:'11px', fontWeight:800, textTransform:'uppercase', letterSpacing:'0.1em', color:'#9ca3af', margin:0 }}>Transaction Preview</p>
+                  {fee.isSpecial && (
+                    <span style={{ fontSize:'10px', fontWeight:900, color:'#fbbf24', background:'rgba(251,191,36,0.15)', border:'1px solid rgba(251,191,36,0.35)', borderRadius:'20px', padding:'2px 8px', letterSpacing:'0.06em' }}>
+                      ⭐ SPECIAL TIER
+                    </span>
+                  )}
+                </div>
+
+                {/* Fee rows */}
+                <div style={{ borderRadius:'12px', border:'1px solid rgba(255,255,255,0.08)', overflow:'hidden' }}>
                   {[
-                    ['You Send',           parseFloat(amount).toFixed(4)+' VEC', '#e5e7eb'],
-                    ['Platform Fee (0.5%)', '− '+fee.feeVec+' VEC',             '#fbbf24'],
-                  ].map(function(r){
+                    { label:'You Send',                     value: parseFloat(amount).toFixed(4)+' VEC',  color:'#e5e7eb', note: null },
+                    { label:'Platform Fee ('+(fee.isSpecial?'0.3%':'0.5%')+')',  value:'− '+fee.platformFee+' VEC',           color:'#fbbf24', note: fee.isSpecial ? 'Special tier (≥10k VEC)' : 'Regular tier' },
+                    { label:'  ↳ Gas Tank (40%)',           value: fee.gasTankAmt+' VEC',                color:'#94a3b8', note: 'Funds relay gas' },
+                    { label:'  ↳ Staking Rewards (40%)',    value: fee.stakingAmt+' VEC',                color:'#94a3b8', note: 'Stakers earn this' },
+                    { label:'  ↳ Treasury (20%)',           value: fee.treasuryAmt+' VEC',               color:'#94a3b8', note: 'VelaCore team' },
+                    { label:'Native Token Fee (0.5%)',      value:'− '+fee.nativeFee+' VEC',             color:'#f87171', note: null },
+                    { label:'  ↳ Burned (0.3%)',            value:'🔥 '+fee.burnAmt+' VEC',              color:'#f87171', note: 'Permanently removed' },
+                    { label:'  ↳ Liquidity Pool (0.2%)',    value: fee.lpAmt+' VEC',                     color:'#94a3b8', note: 'Adds to LP' },
+                  ].map(function(r, i) {
+                    var isSubRow = r.label.startsWith('  ↳')
                     return (
-                      <div key={r[0]} style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                        <span style={{ fontSize:'14px', color:'#9ca3af', fontWeight:500 }}>{r[0]}</span>
-                        <span style={{ fontSize:'14px', fontWeight:700, color:r[2], fontFamily:'monospace' }}>{r[1]}</span>
+                      <div key={i} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding: isSubRow ? '5px 14px' : '9px 14px', background: isSubRow ? 'rgba(0,0,0,0.15)' : 'transparent', borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
+                        <div>
+                          <span style={{ fontSize: isSubRow ? '12px' : '13px', color: isSubRow ? '#6b7280' : '#9ca3af', fontWeight: isSubRow ? 400 : 600 }}>{r.label}</span>
+                          {r.note && <span style={{ fontSize:'11px', color:'#4b5563', marginLeft:'6px' }}>({r.note})</span>}
+                        </div>
+                        <span style={{ fontSize: isSubRow ? '12px' : '13px', fontWeight:700, color:r.color, fontFamily:'monospace' }}>{r.value}</span>
                       </div>
                     )
                   })}
                 </div>
 
-                {/* ── Gasless Badge ── */}
-                <div style={{ borderRadius:'14px', background:'linear-gradient(135deg, rgba(74,222,128,0.1), rgba(16,185,129,0.06))', border:'1px solid rgba(74,222,128,0.35)', padding:'14px 16px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'12px', flexWrap:'wrap' }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
-                    <div style={{ width:'34px', height:'34px', borderRadius:'10px', background:'rgba(74,222,128,0.18)', border:'1px solid rgba(74,222,128,0.4)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-                      <span style={{ fontSize:'18px' }}>⛽</span>
-                    </div>
+                {/* Gasless badge */}
+                <div style={{ borderRadius:'12px', background:'rgba(74,222,128,0.08)', border:'1px solid rgba(74,222,128,0.3)', padding:'10px 14px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                    <span style={{ fontSize:'16px' }}>⛽</span>
                     <div>
-                      <p style={{ fontSize:'13px', fontWeight:800, color:'#4ade80', margin:'0 0 2px' }}>Network Fee: $0.00</p>
-                      <p style={{ fontSize:'12px', color:'#9ca3af', margin:0 }}>Sponsored by VelaCore</p>
+                      <p style={{ fontSize:'12px', fontWeight:800, color:'#4ade80', margin:0 }}>BNB Gas Fee: $0.00</p>
+                      <p style={{ fontSize:'11px', color:'#6b7280', margin:'2px 0 0' }}>Sponsored by VelaCore relay</p>
                     </div>
                   </div>
-                  <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:'4px' }}>
-                    <span style={{ fontSize:'11px', fontWeight:800, color:'#4ade80', background:'rgba(74,222,128,0.15)', border:'1px solid rgba(74,222,128,0.4)', borderRadius:'20px', padding:'3px 10px', letterSpacing:'0.05em', whiteSpace:'nowrap' }}>
-                      ✓ GASLESS
-                    </span>
-                    <span style={{ fontSize:'11px', color:'#6b7280', whiteSpace:'nowrap' }}>vs ~$0.05 on standard</span>
-                  </div>
+                  <span style={{ fontSize:'10px', fontWeight:900, color:'#4ade80', background:'rgba(74,222,128,0.15)', border:'1px solid rgba(74,222,128,0.35)', borderRadius:'20px', padding:'3px 9px' }}>✓ GASLESS</span>
                 </div>
 
-                {/* Recipient total */}
-                <div style={{ borderTop:'1px solid rgba(255,255,255,0.1)', paddingTop:'14px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                  <span style={{ fontSize:'16px', fontWeight:700, color:'#e5e7eb' }}>Recipient Gets</span>
-                  <span style={{ fontSize:'26px', fontWeight:900, color:'#34d399', letterSpacing:'-0.5px' }}>{fee.netRevenue} <span style={{ fontSize:'15px' }}>VEC</span></span>
+                {/* Recipient gets */}
+                <div style={{ borderTop:'1px solid rgba(255,255,255,0.1)', paddingTop:'12px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <span style={{ fontSize:'15px', fontWeight:700, color:'#e5e7eb' }}>Recipient Gets</span>
+                  <span style={{ fontSize:'24px', fontWeight:900, color:'#34d399', letterSpacing:'-0.5px' }}>{fee.netRevenue} <span style={{ fontSize:'13px' }}>VEC</span></span>
                 </div>
               </div>
             )}
@@ -1025,10 +1103,11 @@ export default function App() {
                   <p style={{ fontSize:'11px', fontWeight:800, color:'#9ca3af', textTransform:'uppercase', letterSpacing:'0.12em', margin:'0 0 12px' }}>Fee Breakdown</p>
                   <div style={{ borderRadius:'14px', border:'1px solid rgba(255,255,255,0.09)', overflow:'hidden' }}>
                     {[
-                      { label:'Gross Amount Sent',   value:result.amount.toFixed(6)+' VEC',           note:null,                          color:'#e5e7eb',  bg:'rgba(255,255,255,0.03)' },
-                      { label:'Platform Fee (0.5%)', value:'− '+parseFloat(result.feeVec).toFixed(6)+' VEC', note:'Covers BNB gas for all users', color:'#fbbf24',  bg:'rgba(251,191,36,0.04)'  },
-                      { label:'Network Gas Fee',     value:'$0.00',                                    note:'Sponsored by VelaCore',       color:'#4ade80',  bg:'rgba(74,222,128,0.04)'  },
-                      { label:'Recipient Receives',  value:parseFloat(result.net).toFixed(6)+' VEC',   note:'Net after 0.5% fee',          color:'#34d399',  bg:'rgba(52,211,153,0.05)',  bold:true },
+                      { label:'Gross Amount Sent',             value: result.amount.toFixed(6)+' VEC',                    note: null,                             color:'#e5e7eb', bg:'rgba(255,255,255,0.03)' },
+                      { label:'Platform Fee ('+(result.isSpecial?'0.3% Special':'0.5% Regular')+')', value:'− '+parseFloat(result.feeVec).toFixed(6)+' VEC', note: result.isSpecial?'≥10k VEC holder':'Standard rate', color:'#fbbf24', bg:'rgba(251,191,36,0.04)' },
+                      { label:'Native Token Fee (0.5%)',       value:'− '+parseFloat(result.nativeFee||0).toFixed(6)+' VEC', note:'0.3% burned + 0.2% LP',       color:'#f87171', bg:'rgba(248,113,113,0.04)' },
+                      { label:'BNB Gas Fee',                   value:'$0.00',                                              note:'Sponsored by VelaCore',          color:'#4ade80', bg:'rgba(74,222,128,0.04)'  },
+                      { label:'Recipient Receives',            value: parseFloat(result.net).toFixed(6)+' VEC',            note:'Net amount received',            color:'#34d399', bg:'rgba(52,211,153,0.05)',  bold:true },
                     ].map(function(row, i, arr) {
                       return (
                         <div key={row.label} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'13px 16px', background:row.bg, borderBottom: i < arr.length-1 ? '1px solid rgba(255,255,255,0.07)' : 'none', gap:'12px', flexWrap:'wrap' }}>

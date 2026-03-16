@@ -1,282 +1,255 @@
 import { useState, useMemo } from 'react'
 
-var FILTERS = [
-  { label: '1 Hour',   value: '1h',  ms: 1000 * 60 * 60 },
-  { label: '1 Day',    value: '1d',  ms: 1000 * 60 * 60 * 24 },
-  { label: '1 Week',   value: '1w',  ms: 1000 * 60 * 60 * 24 * 7 },
-  { label: '1 Month',  value: '1m',  ms: 1000 * 60 * 60 * 24 * 30 },
-  { label: '6 Months', value: '6m',  ms: 1000 * 60 * 60 * 24 * 180 },
-  { label: '1 Year',   value: '1y',  ms: 1000 * 60 * 60 * 24 * 365 },
-  { label: 'All Time', value: 'all', ms: null },
+var TIME_FILTERS = [
+  { label: '1 Day',    ms: 86400000 },
+  { label: '1 Week',   ms: 604800000 },
+  { label: '1 Month',  ms: 2592000000 },
+  { label: 'All Time', ms: null },
 ]
 
 function timeAgo(ts) {
-  var diff = Date.now() - ts
-  var s = Math.floor(diff / 1000)
-  var m = Math.floor(s / 60)
-  var h = Math.floor(m / 60)
-  var d = Math.floor(h / 24)
-  if (d > 0) return d + 'd ago'
-  if (h > 0) return h + 'h ago'
-  if (m > 0) return m + 'm ago'
+  var d = Date.now() - ts
+  var s = Math.floor(d/1000), m = Math.floor(s/60), h = Math.floor(m/60), dy = Math.floor(h/24)
+  if (dy > 0) return dy + 'd ago'
+  if (h  > 0) return h  + 'h ago'
+  if (m  > 0) return m  + 'm ago'
   return 'Just now'
 }
-
-function formatDate(ts) {
-  return new Date(ts).toLocaleDateString('en-US', {
-    day: '2-digit', month: 'short', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  })
+function fmtDate(ts) {
+  return new Date(ts).toLocaleString('en-US', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })
 }
-
-function shortAddr(a) {
-  if (!a) return ''
-  return a.slice(0, 6) + '...' + a.slice(-4)
-}
+function short(a) { return a ? a.slice(0,6)+'...'+a.slice(-4) : '' }
 
 function CopyBtn({ text }) {
   var [copied, setCopied] = useState(false)
-  function copy(e) {
-    e.stopPropagation()
-    navigator.clipboard.writeText(text).then(function() {
-      setCopied(true)
-      setTimeout(function() { setCopied(false) }, 1500)
-    })
-  }
   return (
-    <button
-      onClick={copy}
-      className={'text-xs px-2 py-0.5 rounded-md transition-all ' +
-        (copied ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-700 hover:bg-slate-600 text-slate-400 hover:text-slate-200 border border-slate-600/50')}
-    >
+    <button onClick={function(e){ e.stopPropagation(); navigator.clipboard.writeText(text).then(function(){ setCopied(true); setTimeout(function(){ setCopied(false) },1500) }) }}
+      style={{ fontSize:'11px', padding:'2px 8px', borderRadius:'6px', border:'1px solid rgba(255,255,255,0.12)', background: copied?'rgba(74,222,128,0.15)':'rgba(255,255,255,0.06)', color: copied?'#4ade80':'#9ca3af', cursor:'pointer', transition:'all 0.15s', flexShrink:0 }}>
       {copied ? '✓' : 'Copy'}
     </button>
   )
 }
 
-function TxRow({ tx }) {
+function TxRow({ tx, walletAddress }) {
   var [open, setOpen] = useState(false)
+  var isSent     = tx.type === 'sent'     || (tx.from && walletAddress && tx.from.toLowerCase() === walletAddress.toLowerCase())
+  var isReceived = tx.type === 'received' || (!isSent && tx.to && walletAddress && tx.to.toLowerCase() === walletAddress.toLowerCase())
+  var typeColor  = isSent ? '#f87171' : '#4ade80'
+  var typeLabel  = isSent ? 'Sent' : 'Received'
+  var typeArrow  = isSent ? '↑' : '↓'
+  var typeIcon   = isSent ? 'rgba(248,113,113,0.15)' : 'rgba(74,222,128,0.15)'
+  var typeIconB  = isSent ? 'rgba(248,113,113,0.3)' : 'rgba(74,222,128,0.3)'
+
   return (
-    <div className={'rounded-xl border transition-all overflow-hidden ' + (open ? 'border-cyan-500/20 bg-slate-800/60' : 'border-white/6 bg-slate-800/30 hover:border-white/12')}>
-      <div className="flex items-start justify-between p-4 cursor-pointer" onClick={function() { setOpen(function(v) { return !v }) }}>
-        <div className="flex items-start gap-3 flex-1 min-w-0">
-          <div className="w-9 h-9 rounded-full bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center flex-shrink-0 mt-0.5">
-            <span className="text-emerald-400 text-sm font-bold">↑</span>
+    <div style={{ borderRadius:'14px', border:'1px solid rgba(255,255,255,0.07)', background: open?'rgba(255,255,255,0.04)':'rgba(255,255,255,0.02)', marginBottom:'8px', overflow:'hidden', transition:'all 0.15s' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:'12px', padding:'14px 16px', cursor:'pointer' }} onClick={function(){ setOpen(!open) }}>
+        {/* Icon */}
+        <div style={{ width:'38px', height:'38px', borderRadius:'50%', background:typeIcon, border:'1px solid '+typeIconB, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+          <span style={{ fontSize:'16px', fontWeight:900, color:typeColor }}>{typeArrow}</span>
+        </div>
+        {/* Main info */}
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'7px', flexWrap:'wrap', marginBottom:'3px' }}>
+            <span style={{ fontSize:'14px', fontWeight:700, color:'#f9fafb' }}>{parseFloat(tx.amount).toFixed(4)} VEC</span>
+            <span style={{ fontSize:'11px', fontWeight:700, color:typeColor, background: isSent?'rgba(248,113,113,0.12)':'rgba(74,222,128,0.12)', border:'1px solid '+(isSent?'rgba(248,113,113,0.25)':'rgba(74,222,128,0.25)'), borderRadius:'20px', padding:'1px 7px' }}>{typeLabel}</span>
+            <span style={{ fontSize:'11px', color:'#4ade80', background:'rgba(74,222,128,0.1)', border:'1px solid rgba(74,222,128,0.2)', borderRadius:'20px', padding:'1px 7px' }}>⛽ Gasless</span>
           </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-              <span className="text-sm font-bold text-slate-100">{parseFloat(tx.amount).toFixed(4)} VEC</span>
-              <span className="text-xs bg-cyan-500/10 text-cyan-400 border border-cyan-500/15 rounded-full px-2 py-0.5">Gasless</span>
-              <span className="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/15 rounded-full px-2 py-0.5">✓ Success</span>
-            </div>
-            <div className="text-xs text-slate-500 flex items-center gap-1.5 font-mono">
-              <span>{shortAddr(tx.from)}</span>
-              <span className="text-slate-700">→</span>
-              <span>{shortAddr(tx.to)}</span>
-            </div>
+          <div style={{ fontSize:'12px', color:'#6b7280', fontFamily:'monospace' }}>
+            {isSent ? 'To: '+short(tx.to) : 'From: '+short(tx.from)}
           </div>
         </div>
-        <div className="flex flex-col items-end gap-1 flex-shrink-0 ml-3">
-          <p className="text-sm font-bold text-emerald-400">{parseFloat(tx.net).toFixed(4)}</p>
-          <p className="text-xs text-amber-400/70">−{parseFloat(tx.feeVec).toFixed(4)} fee</p>
-          <p className="text-xs text-slate-600">{timeAgo(tx.timestamp)}</p>
-          <span className="text-xs text-slate-700 mt-0.5">{open ? '▲' : '▼'}</span>
+        {/* Right */}
+        <div style={{ textAlign:'right', flexShrink:0 }}>
+          <p style={{ fontSize:'13px', fontWeight:700, color:typeColor, margin:'0 0 2px' }}>
+            {isSent ? '−' : '+'}{parseFloat(isSent ? tx.amount : tx.net).toFixed(4)}
+          </p>
+          <p style={{ fontSize:'11px', color:'#6b7280', margin:'0 0 2px' }}>{timeAgo(tx.timestamp)}</p>
+          <span style={{ fontSize:'11px', color:'#374151' }}>{open ? '▲' : '▼'}</span>
         </div>
       </div>
 
+      {/* Expanded detail */}
       {open && (
-        <div className="border-t border-white/5 px-4 py-4 bg-slate-900/40 flex flex-col gap-2.5">
+        <div style={{ borderTop:'1px solid rgba(255,255,255,0.06)', padding:'14px 16px', background:'rgba(0,0,0,0.2)', display:'flex', flexDirection:'column', gap:'9px' }}>
           {[
-            { label: 'Date & Time', value: formatDate(tx.timestamp), mono: false, copy: null },
-            { label: 'From',        value: shortAddr(tx.from),        mono: true,  copy: tx.from },
-            { label: 'To',          value: shortAddr(tx.to),          mono: true,  copy: tx.to },
-            { label: 'Amount Sent', value: parseFloat(tx.amount).toFixed(8) + ' VEC', mono: true, copy: null },
-            { label: 'Net Received',value: parseFloat(tx.net).toFixed(8) + ' VEC',    mono: true, copy: null },
-            { label: 'Fee Paid',    value: parseFloat(tx.feeVec).toFixed(8) + ' VEC', mono: true, copy: null },
-            { label: 'Gas Cost',    value: '$0.00',                                    mono: false, copy: null },
+            { label:'Date',         value: fmtDate(tx.timestamp),                        copy: null },
+            { label:'From',         value: short(tx.from),                               copy: tx.from },
+            { label:'To',           value: short(tx.to),                                 copy: tx.to },
+            { label:'Amount',       value: parseFloat(tx.amount).toFixed(6)+' VEC',      copy: null },
+            { label:'Net Received', value: parseFloat(tx.net||0).toFixed(6)+' VEC',      copy: null },
+            { label:'Platform Fee', value: parseFloat(tx.feeVec||0).toFixed(6)+' VEC',   copy: null },
+            { label:'Gas Cost',     value: '$0.00  (Gasless)',                            copy: null },
+            { label:'Tx Hash',      value: short(tx.hash),                               copy: tx.hash },
           ].map(function(row) {
             return (
-              <div key={row.label} className="flex items-center justify-between text-xs">
-                <span className="text-slate-500">{row.label}</span>
-                <div className="flex items-center gap-2">
-                  <span className={'text-slate-300 ' + (row.mono ? 'font-mono' : '')}>{row.value}</span>
+              <div key={row.label} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'12px' }}>
+                <span style={{ fontSize:'12px', color:'#6b7280', flexShrink:0 }}>{row.label}</span>
+                <div style={{ display:'flex', alignItems:'center', gap:'7px', minWidth:0 }}>
+                  <span style={{ fontSize:'12px', color:'#d1d5db', fontFamily:'monospace', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{row.value}</span>
                   {row.copy && <CopyBtn text={row.copy} />}
                 </div>
               </div>
             )
           })}
-          <div className="flex items-center justify-between text-xs border-t border-white/5 pt-2.5">
-            <span className="text-slate-500">Tx Hash</span>
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-slate-400">{tx.hash.slice(0, 10)}...{tx.hash.slice(-6)}</span>
-              <CopyBtn text={tx.hash} />
-            </div>
-          </div>
-          <a
-            href={'https://testnet.bscscan.com/tx/' + tx.hash}
-            target="_blank"
-            rel="noreferrer"
-            className="mt-1 flex items-center justify-center gap-1.5 py-2 rounded-xl border border-cyan-500/20 bg-cyan-500/8 text-cyan-400 hover:bg-cyan-500/15 text-xs font-bold transition-all"
-          >
-            View on BscScan ↗
-          </a>
+          {tx.hash && (
+            <a href={'https://testnet.bscscan.com/tx/'+tx.hash} target="_blank" rel="noreferrer"
+              style={{ marginTop:'4px', display:'flex', alignItems:'center', justifyContent:'center', gap:'6px', padding:'9px', borderRadius:'10px', border:'1px solid rgba(99,102,241,0.3)', background:'rgba(99,102,241,0.1)', color:'#a5b4fc', fontSize:'12px', fontWeight:700, textDecoration:'none', transition:'all 0.15s' }}>
+              🔍 View on BscScan ↗
+            </a>
+          )}
         </div>
       )}
     </div>
   )
 }
 
-function exportCSV(list) {
-  var header = 'Date,Hash,From,To,Amount (VEC),Received (VEC),Fee (VEC),Gas Paid'
-  var rows = list.map(function(tx) {
-    return [formatDate(tx.timestamp), tx.hash, tx.from, tx.to,
-      parseFloat(tx.amount).toFixed(8), parseFloat(tx.net).toFixed(8),
-      parseFloat(tx.feeVec).toFixed(8), '$0.00'].join(',')
-  })
-  var blob = new Blob([[header].concat(rows).join('\n')], { type: 'text/csv' })
-  var url  = URL.createObjectURL(blob)
-  var a    = document.createElement('a')
-  a.href = url; a.download = 'velacore_history.csv'; a.click()
-  URL.revokeObjectURL(url)
-}
-
-export default function TransactionHistory(props) {
-  var transactions = props.transactions
-  var onClose      = props.onClose
-
-  var [activeFilter, setActiveFilter] = useState('30d')
-  var [search,       setSearch]       = useState('')
+export default function TransactionHistory({ transactions, walletAddress, onClose }) {
+  var [tab,        setTab]        = useState('all')   // 'all' | 'sent' | 'received'
+  var [timeFilter, setTimeFilter] = useState(null)     // ms or null
+  var [search,     setSearch]     = useState('')
 
   var filtered = useMemo(function() {
-    var now  = Date.now()
-    var list = transactions.slice()
-    var ms   = 1000 * 60 * 60 * 24 * 30
+    var list = (transactions || []).filter(function(tx) {
+      // Tab filter
+      if (tab === 'sent') {
+        var isSent = tx.type === 'sent' || (tx.from && walletAddress && tx.from.toLowerCase() === walletAddress.toLowerCase())
+        if (!isSent) return false
+      }
+      if (tab === 'received') {
+        var isSent2 = tx.type === 'sent' || (tx.from && walletAddress && tx.from.toLowerCase() === walletAddress.toLowerCase())
+        if (isSent2) return false
+      }
+      // Time filter
+      if (timeFilter && Date.now() - tx.timestamp > timeFilter) return false
+      // Search
+      if (search) {
+        var q = search.toLowerCase()
+        return (tx.hash||'').toLowerCase().includes(q) ||
+               (tx.from||'').toLowerCase().includes(q) ||
+               (tx.to||'').toLowerCase().includes(q)
+      }
+      return true
+    })
+    return list
+  }, [transactions, tab, timeFilter, search, walletAddress])
 
-    if (activeFilter !== '30d') {
-      var found = FILTERS.find(function(f) { return f.value === activeFilter })
-      if (found && found.ms !== null) ms = found.ms
-      if (found && found.ms === null) ms = null
-    }
-
-    if (ms !== null) list = list.filter(function(tx) { return now - tx.timestamp <= ms })
-
-    if (search.trim()) {
-      var q = search.trim().toLowerCase()
-      list = list.filter(function(tx) {
-        return tx.hash.toLowerCase().includes(q) || tx.to.toLowerCase().includes(q) || tx.from.toLowerCase().includes(q)
-      })
-    }
-
-    return list.sort(function(a, b) { return b.timestamp - a.timestamp })
-  }, [transactions, activeFilter, search])
-
-  var summaryStats = useMemo(function() {
+  // Stats
+  var stats = useMemo(function() {
+    var sent     = (transactions||[]).filter(function(t){ return t.type==='sent'||(t.from&&walletAddress&&t.from.toLowerCase()===walletAddress.toLowerCase()) })
+    var received = (transactions||[]).filter(function(t){ return t.type==='received'||(!(t.type==='sent'||( t.from&&walletAddress&&t.from.toLowerCase()===walletAddress.toLowerCase()))) })
     return {
-      count:   filtered.length,
-      sent:    filtered.reduce(function(s, tx) { return s + parseFloat(tx.amount || 0) }, 0).toFixed(2),
-      net:     filtered.reduce(function(s, tx) { return s + parseFloat(tx.net    || 0) }, 0).toFixed(2),
-      fee:     filtered.reduce(function(s, tx) { return s + parseFloat(tx.feeVec || 0) }, 0).toFixed(4),
-      gasSaved: (filtered.length * 0.003).toFixed(3),
+      totalSent:     sent.reduce(function(s,t){ return s+parseFloat(t.amount||0) },0).toFixed(2),
+      totalReceived: received.reduce(function(s,t){ return s+parseFloat(t.net||t.amount||0) },0).toFixed(2),
+      sentCount:     sent.length,
+      receivedCount: received.length,
     }
-  }, [filtered])
+  }, [transactions, walletAddress])
+
+  // CSV export
+  function exportCSV() {
+    var rows = [['Date','Type','From','To','Amount','Net','Fee','Hash']]
+    filtered.forEach(function(t) {
+      var isSent = t.type==='sent'||(t.from&&walletAddress&&t.from.toLowerCase()===walletAddress.toLowerCase())
+      rows.push([
+        fmtDate(t.timestamp), isSent?'Sent':'Received',
+        t.from||'', t.to||'',
+        parseFloat(t.amount||0).toFixed(6),
+        parseFloat(t.net||0).toFixed(6),
+        parseFloat(t.feeVec||0).toFixed(6),
+        t.hash||''
+      ])
+    })
+    var csv = rows.map(function(r){ return r.join(',') }).join('\n')
+    var a = document.createElement('a')
+    a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv)
+    a.download = 'velacore_history.csv'
+    a.click()
+  }
+
+  var TABS = [
+    { id:'all',      label:'All',       count: (transactions||[]).length },
+    { id:'sent',     label:'Sent',      count: stats.sentCount },
+    { id:'received', label:'Received',  count: stats.receivedCount },
+  ]
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-      <div
-        className="w-full max-w-4xl bg-[#0d1117] border border-white/8 rounded-2xl flex flex-col max-h-[90vh]"
-        style={{ boxShadow: '0 30px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.04)' }}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/5">
-          <div>
-            <h2 className="text-lg font-extrabold">Transaction History</h2>
-            <p className="text-xs text-slate-500 mt-0.5">Synced across all devices · {transactions.length} total transactions</p>
-          </div>
-          <div className="flex items-center gap-2">
-            {filtered.length > 0 && (
-              <button
-                onClick={function() { exportCSV(filtered) }}
-                className="text-xs font-bold px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition-all flex items-center gap-1.5"
-              >
-                ↓ Export CSV
-              </button>
-            )}
-            <button
-              onClick={onClose}
-              className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 border border-white/8 flex items-center justify-center text-slate-400 hover:text-white transition-all text-sm"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
+    <div style={{ position:'fixed', inset:0, zIndex:300, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px' }}
+      onClick={function(e){ if(e.target===e.currentTarget) onClose() }}>
+      <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.75)', backdropFilter:'blur(8px)' }} onClick={onClose} />
 
-        {/* Filters */}
-        <div className="px-6 py-4 border-b border-white/5 flex flex-col gap-3">
-          <div className="flex flex-wrap gap-1.5">
-            <button
-              onClick={function() { setActiveFilter('30d') }}
-              className={'text-xs px-3 py-1.5 rounded-full font-semibold transition-all ' + (activeFilter === '30d' ? 'bg-cyan-500 text-white shadow shadow-cyan-500/30' : 'bg-slate-800 text-slate-400 hover:bg-slate-700 border border-white/6')}
-            >
-              30 Days
-            </button>
-            {FILTERS.map(function(f) {
+      <div style={{ position:'relative', zIndex:1, width:'100%', maxWidth:'560px', maxHeight:'90vh', borderRadius:'22px', background:'#111827', border:'1px solid rgba(255,255,255,0.1)', boxShadow:'0 32px 80px rgba(0,0,0,0.7)', display:'flex', flexDirection:'column', overflow:'hidden' }}>
+
+        {/* Header */}
+        <div style={{ padding:'18px 20px 0', flexShrink:0 }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'16px' }}>
+            <p style={{ fontSize:'17px', fontWeight:900, color:'#f9fafb', margin:0 }}>Transaction History</p>
+            <div style={{ display:'flex', gap:'8px' }}>
+              <button onClick={exportCSV}
+                style={{ fontSize:'12px', padding:'6px 12px', borderRadius:'9px', border:'1px solid rgba(99,102,241,0.3)', background:'rgba(99,102,241,0.1)', color:'#a5b4fc', cursor:'pointer', fontWeight:700 }}>
+                ↓ CSV
+              </button>
+              <button onClick={onClose}
+                style={{ width:'32px', height:'32px', borderRadius:'9px', border:'1px solid rgba(255,255,255,0.1)', background:'rgba(255,255,255,0.05)', color:'#9ca3af', cursor:'pointer', fontSize:'16px', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                ✕
+              </button>
+            </div>
+          </div>
+
+          {/* Stats row */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginBottom:'14px' }}>
+            {[
+              { label:'Total Sent',     value: stats.totalSent+' VEC',     color:'#f87171', icon:'↑' },
+              { label:'Total Received', value: stats.totalReceived+' VEC', color:'#4ade80', icon:'↓' },
+            ].map(function(s) {
               return (
-                <button
-                  key={f.value}
-                  onClick={function() { setActiveFilter(f.value) }}
-                  className={'text-xs px-3 py-1.5 rounded-full font-semibold transition-all ' + (activeFilter === f.value ? 'bg-cyan-500 text-white shadow shadow-cyan-500/30' : 'bg-slate-800 text-slate-400 hover:bg-slate-700 border border-white/6')}
-                >
-                  {f.label}
+                <div key={s.label} style={{ borderRadius:'12px', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', padding:'12px 14px' }}>
+                  <p style={{ fontSize:'11px', color:'#6b7280', margin:'0 0 4px', fontWeight:600 }}>{s.icon} {s.label}</p>
+                  <p style={{ fontSize:'16px', fontWeight:900, color:s.color, margin:0, fontFamily:'monospace' }}>{s.value}</p>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Tabs */}
+          <div style={{ display:'flex', gap:'6px', marginBottom:'12px' }}>
+            {TABS.map(function(t) {
+              return (
+                <button key={t.id} onClick={function(){ setTab(t.id) }}
+                  style={{ flex:1, padding:'8px', borderRadius:'10px', border:'1px solid '+(tab===t.id?'rgba(99,102,241,0.5)':'rgba(255,255,255,0.08)'), background: tab===t.id?'rgba(99,102,241,0.18)':'rgba(255,255,255,0.03)', color: tab===t.id?'#a5b4fc':'#6b7280', fontSize:'13px', fontWeight:700, cursor:'pointer', transition:'all 0.15s' }}>
+                  {t.label}
+                  <span style={{ marginLeft:'5px', fontSize:'11px', opacity:0.8 }}>({t.count})</span>
                 </button>
               )
             })}
           </div>
-          <input
-            type="text"
-            placeholder="Search by wallet address or transaction hash..."
-            value={search}
-            onChange={function(e) { setSearch(e.target.value) }}
-            className="w-full bg-slate-800/60 border border-white/8 focus:border-cyan-500/40 outline-none rounded-xl px-4 py-2.5 text-sm font-mono text-slate-100 placeholder-slate-600 transition-colors"
-          />
-        </div>
 
-        {/* Summary stats */}
-        <div className="px-6 py-3 border-b border-white/5 grid grid-cols-5 gap-3">
-          {[
-            { label: 'Txs',       value: summaryStats.count,    color: 'text-cyan-400' },
-            { label: 'Sent',      value: summaryStats.sent,     color: 'text-slate-200' },
-            { label: 'Received',  value: summaryStats.net,      color: 'text-emerald-400' },
-            { label: 'Fees',      value: summaryStats.fee,      color: 'text-amber-400' },
-            { label: 'Gas Saved', value: '$'+summaryStats.gasSaved, color: 'text-violet-400' },
-          ].map(function(s) {
-            return (
-              <div key={s.label} className="text-center">
-                <p className="text-xs text-slate-600 uppercase tracking-widest mb-0.5">{s.label}</p>
-                <p className={'text-base font-extrabold ' + s.color}>{s.value}</p>
-              </div>
-            )
-          })}
+          {/* Search + Time filter */}
+          <div style={{ display:'flex', gap:'8px', marginBottom:'14px' }}>
+            <input value={search} onChange={function(e){ setSearch(e.target.value) }}
+              placeholder="Search address or hash..."
+              style={{ flex:1, background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'10px', padding:'8px 12px', color:'#f9fafb', fontSize:'13px', outline:'none' }} />
+            <select value={timeFilter||''} onChange={function(e){ setTimeFilter(e.target.value ? parseInt(e.target.value) : null) }}
+              style={{ background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'10px', padding:'8px 10px', color:'#9ca3af', fontSize:'12px', cursor:'pointer', outline:'none' }}>
+              <option value="">All Time</option>
+              {TIME_FILTERS.filter(function(f){ return f.ms }).map(function(f) {
+                return <option key={f.label} value={f.ms}>{f.label}</option>
+              })}
+            </select>
+          </div>
         </div>
 
         {/* List */}
-        <div className="flex-1 overflow-y-auto px-6 py-4 flex flex-col gap-2">
+        <div style={{ flex:1, overflowY:'auto', padding:'0 20px 20px', scrollbarWidth:'thin', scrollbarColor:'rgba(255,255,255,0.08) transparent' }}>
           {filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center">
-              <div className="w-16 h-16 rounded-2xl bg-slate-800/60 border border-white/6 flex items-center justify-center text-3xl mb-4">📭</div>
-              <p className="text-slate-400 font-semibold">No transactions found</p>
-              <p className="text-slate-600 text-sm mt-1.5">Try changing the time filter or clearing your search</p>
+            <div style={{ textAlign:'center', padding:'40px 0', color:'#374151' }}>
+              <p style={{ fontSize:'32px', marginBottom:'10px' }}>📭</p>
+              <p style={{ fontSize:'14px' }}>No transactions found</p>
             </div>
           ) : (
-            filtered.map(function(tx) {
-              return <TxRow key={tx.hash} tx={tx} />
+            filtered.map(function(tx, i) {
+              return <TxRow key={tx.hash||i} tx={tx} walletAddress={walletAddress} />
             })
           )}
-        </div>
-
-        {/* Footer */}
-        <div className="px-6 py-3 border-t border-white/5 flex items-center justify-between">
-          <span className="text-xs text-slate-600">Showing {filtered.length} of {transactions.length} transactions</span>
-          <span className="text-xs text-emerald-600 font-semibold">$0.00 total gas paid</span>
         </div>
       </div>
     </div>

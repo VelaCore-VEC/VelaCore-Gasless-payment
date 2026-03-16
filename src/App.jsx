@@ -433,6 +433,38 @@ export default function App() {
     }
   }, [txHistory])
 
+  // ── Sound system ──────────────────────────────────────────────────────────
+  function playSound(type) {
+    try {
+      var ctx = new (window.AudioContext || window.webkitAudioContext)()
+      var osc = ctx.createOscillator()
+      var gain = ctx.createGain()
+      osc.connect(gain); gain.connect(ctx.destination)
+      if (type === 'send') {
+        // Two-tone send sound
+        osc.frequency.setValueAtTime(520, ctx.currentTime)
+        osc.frequency.setValueAtTime(680, ctx.currentTime + 0.12)
+        gain.gain.setValueAtTime(0.18, ctx.currentTime)
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35)
+        osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.35)
+      } else if (type === 'receive') {
+        // Three-tone receive chime
+        osc.frequency.setValueAtTime(440, ctx.currentTime)
+        osc.frequency.setValueAtTime(554, ctx.currentTime + 0.1)
+        osc.frequency.setValueAtTime(659, ctx.currentTime + 0.2)
+        gain.gain.setValueAtTime(0.18, ctx.currentTime)
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45)
+        osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.45)
+      } else if (type === 'error') {
+        osc.frequency.setValueAtTime(220, ctx.currentTime)
+        osc.frequency.setValueAtTime(180, ctx.currentTime + 0.15)
+        gain.gain.setValueAtTime(0.15, ctx.currentTime)
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3)
+        osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.3)
+      }
+    } catch(e) {}
+  }
+
   function addToast(title, desc, type) {
     var id = toastId.current++
     setToasts(function(p){ return [...p,{id,title,desc:desc||'',type:type||'info'}] })
@@ -469,6 +501,7 @@ export default function App() {
           loadBalance(wallet)
           loadHistory(wallet.address)
           if (curr > prev) {
+            playSound('receive')
             addToast('VEC Received! 💰', (curr - prev).toFixed(4) + ' VEC added to your wallet.', 'success')
           }
         }
@@ -489,13 +522,43 @@ export default function App() {
     } catch(e){ setBalance('0.00'); setRawBalance('0') }
   },[])
 
+  // ── Persistent history helpers ───────────────────────────────────────────
+  function getStorageKey(addr) { return 'vec_history_' + addr.toLowerCase() }
+
+  function saveHistoryLocal(addr, history) {
+    try { localStorage.setItem(getStorageKey(addr), JSON.stringify(history)) } catch(e) {}
+  }
+
+  function loadHistoryLocal(addr) {
+    try {
+      var raw = localStorage.getItem(getStorageKey(addr))
+      return raw ? JSON.parse(raw) : []
+    } catch(e) { return [] }
+  }
+
+  function mergeHistory(existing, incoming) {
+    // Merge by hash — no duplicates, newest first
+    var map = {}
+    existing.forEach(function(t) { if(t.hash) map[t.hash] = t })
+    incoming.forEach(function(t) { if(t.hash) map[t.hash] = t })
+    return Object.values(map).sort(function(a,b){ return b.timestamp - a.timestamp })
+  }
+
   var loadHistory = useCallback(async function(addr){
     if(!addr) return
     setHistoryLoading(true)
+    // Load from localStorage first (instant)
+    var local = loadHistoryLocal(addr)
+    if(local.length > 0) setTxHistory(local)
+    // Then fetch from server and merge
     try{
       var r = await fetch(RELAY_SERVER_URL + '?history=' + addr)
       var d = await r.json()
-      if(d.success) setTxHistory(d.history)
+      if(d.success && d.history) {
+        var merged = mergeHistory(local, d.history)
+        setTxHistory(merged)
+        saveHistoryLocal(addr, merged)
+      }
     } catch(e){}
     setHistoryLoading(false)
   },[])
@@ -633,12 +696,28 @@ export default function App() {
         nativeFee: feeCalc ? parseFloat(feeCalc.nativeFee) : 0,
         isSpecial: feeCalc ? feeCalc.isSpecial : false,
       })
+      // Save sent tx to localStorage immediately (don't wait for server)
+      var newTx = {
+        hash:      data.txHash,
+        from:      wallet.address,
+        to:        toAddr,
+        amount:    parseFloat(amount).toFixed(6),
+        net:       data.amountSent,
+        feeVec:    data.feeCollected,
+        type:      'sent',
+        timestamp: Date.now(),
+      }
+      var existing = loadHistoryLocal(wallet.address)
+      var updated  = mergeHistory(existing, [newTx])
+      saveHistoryLocal(wallet.address, updated)
+      setTxHistory(updated)
+      playSound('send')
       setShowConfetti(true)
       setTimeout(function(){ setShowConfetti(false) }, 4500)
       addToast('Transfer Successful! 🎉', parseFloat(amount)+' VEC sent — $0.00 gas paid.','success')
       setToAddr(''); setAmount(''); setPrefillNote('')
       setTimeout(function(){ loadBalance(wallet); loadHistory(wallet.address) },3000)
-    } catch(err){ addToast('Transaction Failed',friendlyError(err.message),'error'); setStatus('connected'); setStep(0) }
+    } catch(err){ playSound('error'); addToast('Transaction Failed',friendlyError(err.message),'error'); setStatus('connected'); setStep(0) }
   },[wallet,toAddr,amount,connect,loadBalance,loadHistory,rawBalance,balance])
 
   var busy      = status==='signing'||status==='sending'
@@ -707,7 +786,7 @@ export default function App() {
       <Toast toasts={toasts} remove={removeToast} />
       <Confetti active={showConfetti} />
 
-      {showHistory && <TransactionHistory transactions={txHistory} onClose={function(){ setShowHistory(false) }} />}
+      {showHistory && <TransactionHistory transactions={txHistory} walletAddress={wallet ? wallet.address : ''} onClose={function(){ setShowHistory(false) }} />}
       {showWalletModal && (
         <WalletSelectorModal
           onClose={function(){ setShowWalletModal(false); setStatus('idle') }}

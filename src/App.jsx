@@ -9,16 +9,6 @@ import ShareModal from './ShareModal.jsx'
 import CurrencyConverter from './CurrencyConverter.jsx'
 import VelaCoreAI from './VelaCoreAI.jsx'
 
-// ─── Color System ───────────────────────────────────────────────────────────────
-// BG:       #0a0e1a   (deep navy)
-// CARD:     #111827   (dark blue-gray)
-// BORDER:   rgba(255,255,255,0.10)  visible border
-// TEXT-1:   #f9fafb   headings     (white)
-// TEXT-2:   #e5e7eb   body         (light gray)
-// TEXT-3:   #d1d5db   secondary    (medium gray)
-// TEXT-4:   #9ca3af   labels/muted (readable gray)
-// TEXT-5:   #6b7280   subtle text  (minimum, sparingly)
-
 function friendlyError(msg) {
   if (!msg) return 'Something went wrong. Please try again.'
   var m = msg.toLowerCase()
@@ -28,11 +18,9 @@ function friendlyError(msg) {
   if (m.includes('cannot reach') || m.includes('failed to fetch') || m.includes('networkerror')) return 'Cannot reach relay server — make sure it is running on port 3001.'
   if (m.includes('metamask') || m.includes('provider'))          return 'MetaMask not found — please install it.'
   if (m.includes('wrong network') || m.includes('switch to bnb')) return 'Wrong network — switch to BNB Testnet.'
-  // For all other errors (including server errors) — show the REAL message
   return msg
 }
 
-// ─── Toast notifications ────────────────────────────────────────────────────────
 function Toast({ toasts, remove }) {
   if (!toasts.length) return null
   var MAP = {
@@ -547,19 +535,22 @@ export default function App() {
   var loadHistory = useCallback(async function(addr){
     if(!addr) return
     setHistoryLoading(true)
-    // Load from localStorage first (instant)
+    // Show localStorage instantly while server loads (offline-first)
     var local = loadHistoryLocal(addr)
     if(local.length > 0) setTxHistory(local)
-    // Then fetch from server and merge
+    // Fetch from server — this is the cross-device source of truth
     try{
       var r = await fetch(RELAY_SERVER_URL + '?history=' + addr)
       var d = await r.json()
-      if(d.success && d.history) {
+      if(d.success && Array.isArray(d.history)) {
+        // Merge server + local (server wins on conflicts by hash)
         var merged = mergeHistory(local, d.history)
         setTxHistory(merged)
-        saveHistoryLocal(addr, merged)
+        saveHistoryLocal(addr, merged)  // update local cache
       }
-    } catch(e){}
+    } catch(e){
+      // Server unreachable — keep showing local cache
+    }
     setHistoryLoading(false)
   },[])
 

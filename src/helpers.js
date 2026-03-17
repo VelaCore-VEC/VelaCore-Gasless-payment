@@ -9,8 +9,6 @@ export const PLATFORM_FEE_SPECIAL    = 30   // 0.3% special users (≥10k VEC)
 export const SPECIAL_THRESHOLD       = 10000 // 10,000 VEC
 
 // ── Calculate full fee breakdown ────────────────────────────────────────────
-// amount: number (VEC, not wei)
-// userBalance: number (VEC) — to determine special tier
 export function calcFee(amount, userBalance) {
   if (!amount || amount <= 0) return null
   var bal = parseFloat(userBalance || 0)
@@ -49,35 +47,70 @@ export function calcFee(amount, userBalance) {
 
 // ── EIP-712 Permit signature ────────────────────────────────────────────────
 export async function signPermit(signer, tokenContract, owner, spender, amountWei, deadline) {
-  var chainId    = (await signer.provider.getNetwork()).chainId
-  var tokenName  = await tokenContract.name()
-  var nonce      = await tokenContract.nonces(owner)
-  var domainSep  = await tokenContract.DOMAIN_SEPARATOR()
+  var network   = await signer.provider.getNetwork()
+  var chainId   = Number(network.chainId)
+  var tokenName = await tokenContract.name()
+  var nonce     = await tokenContract.nonces(owner)
+  var tokenAddr = await tokenContract.getAddress()
 
-  var domain = {
-    name:              tokenName,
-    version:           '1',
-    chainId:           chainId,
-    verifyingContract: await tokenContract.getAddress(),
-  }
-  var types = {
-    Permit: [
-      { name: 'owner',    type: 'address' },
-      { name: 'spender',  type: 'address' },
-      { name: 'value',    type: 'uint256' },
-      { name: 'nonce',    type: 'uint256' },
-      { name: 'deadline', type: 'uint256' },
-    ]
-  }
-  var message = {
-    owner:    owner,
-    spender:  spender,
-    value:    amountWei,
-    nonce:    nonce,
-    deadline: deadline,
+  var typedData = {
+    domain: {
+      name:              tokenName,
+      version:           '1',
+      chainId:           chainId,
+      verifyingContract: tokenAddr,
+    },
+    types: {
+      EIP712Domain: [
+        { name: 'name',              type: 'string'  },
+        { name: 'version',           type: 'string'  },
+        { name: 'chainId',           type: 'uint256' },
+        { name: 'verifyingContract', type: 'address' },
+      ],
+      Permit: [
+        { name: 'owner',    type: 'address' },
+        { name: 'spender',  type: 'address' },
+        { name: 'value',    type: 'uint256' },
+        { name: 'nonce',    type: 'uint256' },
+        { name: 'deadline', type: 'uint256' },
+      ],
+    },
+    primaryType: 'Permit',
+    message: {
+      owner:    owner,
+      spender:  spender,
+      value:    amountWei.toString(),
+      nonce:    nonce.toString(),
+      deadline: deadline.toString(),
+    },
   }
 
-  var sig = await signer.signTypedData(domain, types, message)
+  // Use raw provider request — works on ALL wallets (Trust, MetaMask, Coinbase, etc.)
+  var rawProvider = signer.provider
+  var sig
+  try {
+    // Method 1: Direct raw provider (Trust Wallet, WalletConnect compatible)
+    sig = await rawProvider.send('eth_signTypedData_v4', [
+      owner,
+      JSON.stringify(typedData)
+    ])
+  } catch(e1) {
+    try {
+      // Method 2: ethers signer fallback
+      sig = await signer.signTypedData(typedData.domain, { Permit: typedData.types.Permit }, typedData.message)
+    } catch(e2) {
+      try {
+        // Method 3: personal_sign fallback (very old wallets)
+        sig = await rawProvider.send('personal_sign', [
+          ethers.TypedDataEncoder.hash(typedData.domain, { Permit: typedData.types.Permit }, typedData.message),
+          owner
+        ])
+      } catch(e3) {
+        throw new Error('Wallet signature failed. Please try again or switch wallet.')
+      }
+    }
+  }
+
   var { v, r, s } = ethers.Signature.from(sig)
   return { v, r, s, deadline }
 }

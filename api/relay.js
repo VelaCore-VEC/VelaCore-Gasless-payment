@@ -1,5 +1,15 @@
+// api/relay.js — VelaCore Gasless Relay (Vercel Serverless Function)
+// Place in your frontend repo: /api/relay.js
+// Vercel auto-deploys this as a serverless function
+//
+// Required Vercel env vars (Settings → Environment Variables):
+//   RELAYER_PRIVATE_KEY = 0x...your relayer wallet private key
+//   VEC_TOKEN_ADDRESS   = 0x57Cd84ebe7cb619277760Bd26CdF18d75a14c37B
+//   RPC_URL             = https://data-seed-prebsc-1-s1.binance.org:8545/
+
 const { ethers } = require('ethers')
 
+// Global in-memory store — survives warm requests, resets on cold start
 if (!global._vecHistory) global._vecHistory = {}
 
 const RPC_URL           = process.env.RPC_URL || 'https://data-seed-prebsc-1-s1.binance.org:8545/'
@@ -98,7 +108,9 @@ module.exports = async function handler(req, res) {
     const netFmt    = ethers.formatUnits(netAmount.toString(), 18)
     const feeFmt    = ethers.formatUnits(fee.toString(), 18)
 
-    saveTx(owner, { hash:transferRcpt.hash, from:owner, to, amount:amountFmt, net:netFmt, feeVec:feeFmt, timestamp:Date.now() })
+    var txRecord = { hash:transferRcpt.hash, from:owner, to, amount:amountFmt, net:netFmt, feeVec:feeFmt, timestamp:Date.now() }
+    saveTx(owner, { ...txRecord, type:'sent' })      // sender history
+    saveTx(to,    { ...txRecord, type:'received' })  // recipient history
     console.log('[relay] done:', transferRcpt.hash)
 
     return res.json({

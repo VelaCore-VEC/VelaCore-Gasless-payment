@@ -62,8 +62,8 @@ User Wallet (MetaMask / Trust Wallet)
 
 ```bash
 # Fork the repo on GitHub first, then:
-git clone https://github.com/YOUR_USERNAME/VelaCore-DApp.git
-cd VelaCore-DApp
+git clone https://github.com/VelaCore-VEC/VelaCore-Gasless-payment.git
+cd VelaCore-Gasless-payment
 npm install
 ```
 
